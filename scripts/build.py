@@ -24,10 +24,15 @@ rep('<meta charset="utf-8">', '''<meta charset="utf-8">
 <link rel="apple-touch-icon" href="./icons/apple-180.png">
 <link rel="icon" type="image/png" href="./icons/favicon-64.png">''')
 s = s.replace('width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no', 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover')
-# Online gibt es in der App erst mit dem eigenen Server (Schritt 2)
+# Texte, die sich auf Claude beziehen, für die App anpassen
 for who in ('Gegnern', 'Mitspielern'):
-    s = s.replace(f'Online ist gerade nicht verfügbar.\\nDu musst bei Claude angemeldet sein, und das Spiel muss mit deinen {who} geteilt sein (mindestens als „Mitwirkender“).',
-                  'Online kommt in der App in Kürze.\\nBis dahin: Online-Spiele, Coop-Liga und Rangliste über den Claude-Link spielen.')
+    s = s.replace(f'Du musst bei Claude angemeldet sein, und das Spiel muss mit deinen {who} geteilt sein (mindestens als „Mitwirkender“).', 'Bitte Internetverbindung prüfen.')
+s = s.replace('Angemeldet mit deinem Claude-Konto', 'Angemeldet mit deinem 9PinSim-Konto')
+s = s.replace('Öffne das Spiel in Claude mit deinem Konto (angemeldet) – dann wird dein Fortschritt im Konto gespeichert.', 'Keine Verbindung zum Server.')
+s = s.replace('Spiel über Claude öffnen und mit deinen Mitspielern teilen (mindestens als „Mitwirkender“)', 'Internetverbindung prüfen')
+s = s.replace('Nur der Besitzer des Spiels darf Vereinsbahnen ändern', 'Nur der Admin darf Vereinsbahnen ändern')
+shim = (root / 'scripts/shim.js').read_text(encoding='utf-8')
+rep('<link rel="manifest"', '<script>\n' + shim + '\n</script>\n<link rel="manifest"')
 app = (root / 'scripts/app.js').read_text(encoding='utf-8')
 rep('</body>', '<script>\n' + app + '\n</script>\n</body>')
 (root / 'public/index.html').write_text(s, encoding='utf-8')

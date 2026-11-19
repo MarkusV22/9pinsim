@@ -1,7 +1,14 @@
 {
-  // 9PinSim als installierbare Web-App – nur Dateien, noch kein Server-Code (kommt in Schritt 2)
+  // 9PinSim: App-Dateien + Server (Konten, Datenbank, Echtzeit-Räume)
   "name": "9pinsim",
+  "main": "src/worker.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
-  "assets": { "directory": "./public", "not_found_handling": "single-page-application" }
+  "preview_urls": false,
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "9pinsim", "database_id": "LOCAL-ONLY-REPLACE-AFTER-wrangler-d1-create", "migrations_dir": "migrations" }],
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  // Admin (Vereinsbahnen bearbeiten, Fehlerprotokoll lesen): Anmeldenamen, kommagetrennt
+  "vars": { "ADMIN_LOGINS": "markus" }
 }

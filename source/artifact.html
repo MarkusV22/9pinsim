@@ -3777,15 +3777,16 @@ async function showCoop() {
   if (!lanesLoaded) await lanesLoad();
   await coopRefresh();
 }
-function coopRender(html) {   // Chat-Entwurf beim Neuzeichnen behalten
-  const m = $('cpMsg'), draft = m?.value || '', foc = document.activeElement === m;
+function coopRender(html) {   // Eingaben (Teamname, Code, Chat-Entwurf) beim Neuzeichnen behalten
+  const keep = {}, foc = document.activeElement?.id;
+  ['cpMsg', 'cpName', 'cpCode'].forEach(id => { const e = $(id); if (e) keep[id] = e.value; });
   $('cpBody').innerHTML = html;
-  const n = $('cpMsg'); if (n) { n.value = draft; if (foc) n.focus(); }
+  for (const id in keep) { const e = $(id); if (e) { e.value = keep[id]; if (foc === id) e.focus(); } }
   const l = $('cpChat'); if (l) l.scrollTop = l.scrollHeight;
 }
-async function coopRefresh() {
-  if (COOP.busy || !net.db) return; COOP.busy = true;
-  try { await coopLoad(); } catch (e) { COOP.err = 'Coop-Liga gerade nicht erreichbar.'; }
+async function coopRefresh() {   // läuft schon ein Laden, danach gleich noch einmal (sonst gewinnt ein veralteter Stand)
+  if (!net.db) return; if (COOP.busy) { COOP.again = true; return; } COOP.busy = true;
+  for (let i = 0; i < 2; i++) { COOP.again = false; try { await coopLoad(); } catch (e) { COOP.err = 'Coop-Liga gerade nicht erreichbar.'; } if (!COOP.again) break; }
   COOP.busy = false; coopDraw();
 }
 async function coopLoad() {

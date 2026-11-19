@@ -1,0 +1,12 @@
+{
+  "name": "9pinsim",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python3 scripts/build.py",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.165.0"
+  }
+}

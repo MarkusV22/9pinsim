@@ -20,5 +20,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Datenbank anlegen
+        run: node scripts/ci-provision.mjs
+      - name: Datenbank-Schema aktualisieren
+        run: npx --yes wrangler@4 d1 migrations apply 9pinsim --remote
       - name: Veröffentlichen
         run: npx --yes wrangler@4 deploy
