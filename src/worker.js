@@ -41,10 +41,16 @@ const validPath = (p, even) => typeof p === 'string' && p.length < 300 && /^[A-Z
 async function api(req, env, url) {
   const p = url.pathname.slice(5), body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   // --- Konto ---
-  if (p === 'auth/guest') {   // neues Gastkonto (automatisch beim ersten Start)
-    const id = 'u' + rnd(8), nick = clean(body.name, 18) || 'Spieler';
-    await env.DB.prepare('INSERT INTO users (id, nick, created) VALUES (?, ?, ?)').bind(id, nick, Date.now()).run();
-    return J({ token: await newSession(env, id), user: { id, name: nick, login: null, admin: false } });
+  if (p === 'auth/guest') return J({ error: 'Bitte anmelden oder ein Konto erstellen' }, 410);   // Gastkonten gibt es nicht mehr (Markus, 19.11.)
+  if (p === 'auth/register') {   // neues Konto mit Anmeldename + Passwort
+    const login = clean(body.login, 24).toLowerCase(), pass = String(body.pass || ''), nick = clean(body.name, 18) || clean(body.login, 18);
+    if (!/^[a-z0-9äöüß._\-]{3,24}$/.test(login)) return J({ error: 'Anmeldename: 3–24 Zeichen, Buchstaben/Zahlen' }, 400);
+    if (pass.length < 6) return J({ error: 'Passwort: mindestens 6 Zeichen' }, 400);
+    if (await env.DB.prepare('SELECT id FROM users WHERE login = ?').bind(login).first()) return J({ error: 'Anmeldename ist schon vergeben' }, 409);
+    const id = 'u' + rnd(8), salt = rnd(12);
+    await env.DB.prepare('INSERT INTO users (id, nick, login, pass, salt, created) VALUES (?, ?, ?, ?, ?, ?)').bind(id, nick || 'Spieler', login, await pbkdf2(pass, salt), salt, Date.now()).run();
+    const u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(id).first();
+    return J({ token: await newSession(env, id), user: pub(env, u) });
   }
   if (p === 'auth/google/start') return googleStart(req, env, url);
   if (p === 'auth/google/callback') return googleCallback(req, env, url);

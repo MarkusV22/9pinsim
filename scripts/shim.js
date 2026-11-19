@@ -22,13 +22,16 @@
     if (!r.ok) { const e = new Error(j.error || ('HTTP ' + r.status)); e.status = r.status; throw e; }
     return j;
   }
-  async function guest() { const j = await call('auth/guest', { name: nick() }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } }
+  // Ohne Anmeldung kein Spiel (Markus, 19.11.): kein Gastkonto mehr – die App zeigt dann die Anmeldung (app.js)
+  const ME = '9pinsim_me', named = u => !!(u && (u.login || u.google));
+  let cached = null; try { cached = JSON.parse(localStorage.getItem(ME) || 'null'); } catch (e) { }
+  const keepMe = () => { try { localStorage.setItem(ME, JSON.stringify(me)); } catch (e) { } };
   function init() {
     if (ready) return ready;
     ready = (async () => {
-      if (!navigator.onLine && !token) throw new Error('offline');
-      if (token) { try { me = (await call('me', { name: nick() || undefined })).user; } catch (e) { if (e.status === 401) await guest(); else throw e; } }
-      else await guest();
+      if (!token) { const e = new Error('nicht angemeldet'); e.status = 401; throw e; }
+      try { me = (await call('me', { name: nick() || undefined })).user; keepMe(); }
+      catch (e) { if (e.status === 401) { token = null; me = null; try { localStorage.removeItem(TK); localStorage.removeItem(ME); } catch (x) { } } throw e; }
       return me;
     })();
     ready.catch(() => { ready = null; });
@@ -100,9 +103,13 @@
   // für den Konto-Bildschirm der App
   window.__app = {
     me: () => me, init,
+    // Anmeldung nötig? true = Anmeldefenster zeigen. Offline mit gespeicherter Anmeldung darf gespielt werden.
+    needLogin: () => !token || (!named(me) && !(cached && named(cached) && !navigator.onLine)),
+    cached: () => cached,
+    register: async (login, pass, name) => { const j = await call('auth/register', { login, pass, name }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } keepMe(); return me; },
     claim: async (login, pass) => { const j = await call('auth/claim', { login, pass }); me = j.user; return me; },
-    login: async (login, pass) => { const j = await call('auth/login', { login, pass }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } return me; },
-    logout: async () => { try { await call('auth/logout', {}); } catch (e) { } try { localStorage.removeItem(TK); } catch (e) { } token = null; me = null; },
+    login: async (login, pass) => { const j = await call('auth/login', { login, pass }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } keepMe(); return me; },
+    logout: async () => { try { await call('auth/logout', {}); } catch (e) { } try { localStorage.removeItem(TK); localStorage.removeItem(ME); } catch (e) { } token = null; me = null; },
     setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } },
     google: () => { location.href = API + 'auth/google/start' + (token ? '?token=' + encodeURIComponent(token) : ''); },
     gErr: () => { const e = gErr; gErr = ''; return e; },
