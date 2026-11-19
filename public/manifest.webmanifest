@@ -1,0 +1,19 @@
+{
+  "name": "9PinSim – Classic-Kegeln",
+  "short_name": "9PinSim",
+  "description": "Classic-Kegeln (9 Kegel) mit echter Physik: Training, Liga, Duelle.",
+  "lang": "de-AT",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "portrait",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "categories": ["games", "sports"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

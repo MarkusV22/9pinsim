@@ -1,0 +1,7 @@
+{
+  // 9PinSim als installierbare Web-App – nur Dateien, noch kein Server-Code (kommt in Schritt 2)
+  "name": "9pinsim",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "assets": { "directory": "./public", "not_found_handling": "single-page-application" }
+}
