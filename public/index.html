@@ -118,7 +118,8 @@
     setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } },
     google: () => { location.href = API + 'auth/google/start' + (token ? '?token=' + encodeURIComponent(token) : ''); },
     gErr: () => { const e = gErr; gErr = ''; return e; },
-    peekGErr: () => gErr
+    peekGErr: () => gErr,
+    api: (path, body, method) => call(path, body, method)
   };
 })();
 
@@ -3949,6 +3950,12 @@ async function coopFreeze() {
     if (x) res[u] = { s: x.s, os: x.os, sp: x.sp ?? null, osp: x.osp ?? null, a: x.a || [x.s], b: x.b || [x.os], quit: x.quit ? 1 : 0 }; });
   const pad = Array.from({ length: COOP_POS }, (_, k) => line[k] || '');
   await withTimeout(cdoc(`d/${no}-${d}`).set({ se: no, day: d, line: pad, res, names, lvl: COOP.S.lvl | 0, t: Date.now(), by: net.uid }), 10000);
+  try {   // Mitteilung an das Team: Ergebnis + nächster Spieltag offen
+    const S = COOP.S, mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), m = coopMatch(S, d, mi, { line: pad, res, names, lvl: S.lvl | 0 });
+    const usA = m.a === 0, our = usA ? m.mpA : m.mpB, their = usA ? m.mpB : m.mpA, opp = S.teams[usA ? m.b : m.a].name;
+    window.__push?.team(COOP.tid, { kind: 'day', title: `Spieltag ${d + 1}: ${spTxt(our)} : ${spTxt(their)} gegen ${opp}`,
+      body: (our > their ? 'Sieg! 🎉 ' : our < their ? 'Niederlage. ' : 'Unentschieden. ') + (d + 1 < COOP_DAYS ? `Spieltag ${d + 2} ist offen – dein Duell wartet.` : 'Die Saison ist zu Ende – schau dir die Tabelle an.') });
+  } catch (e) { }
   return coopLoad();
 }
 async function coopSeasonEnd() {
@@ -4019,6 +4026,7 @@ function coopDraw() {
   else h += `<div class="tag">Dein Duell ist gespielt. Warte auf: ${esc(wait.join(', ') || '–')}</div>`;
   h += `<div class="tag" style="margin:6px 0 0;font-size:13px">Gegnerstärke: <b>${COOP_LVLS[S.lvl][1]}</b>${S.lvl ? ' (Schnitte der Gegner × ' + lvlF(S.lvl) + ')' : ' (echte Schnitte)'}${cap ? ' – als Kapitän hier einstellbar' : ''}</div>`;
   if (cap) h += `<div class="cpLv">${COOP_LVLS.map(([, n], i) => `<button class="${i === S.lvl ? 'on' : ''}" data-lv="${i}">${n}</button>`).join('')}</div>`;
+  if (cap && wait.length && window.__push) h += `<button class="btn" id="cpRemind">Erinnerung schicken <small>an ${wait.length === 1 ? esc(wait[0]) : wait.length + ' Spieler'}</small></button>`;
   if (cap) h += `<button class="btn" id="cpClose">Spieltag abschließen <small>${wait.length ? 'fehlende Duelle werden simuliert' : ''}</small></button>`;
   h += '</div>';
   // Tabelle
@@ -4044,10 +4052,15 @@ function coopBind() {
   $('cpBody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => coopCreate(+b.dataset.f));
   on('cpJoin', () => coopJoin(($('cpCode').value || '').trim().toUpperCase()));
   on('cpPlay', coopPlay);
+  on('cpRemind', async () => {   // Kapitän erinnert, wer noch nicht gespielt hat
+    const S = COOP.S, d = COOP.day, line = coopLine(), only = line.filter(u => !COOP.res.some(x => x.uid === u));
+    const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), opp = S.teams[a === 0 ? b : a].name;
+    const j = await window.__push.team(COOP.tid, { kind: 'remind', only, title: 'Coop-Liga: dein Duell wartet', body: `Spieltag ${d + 1} gegen ${opp} – ${line.length - only.length} von ${line.length} haben schon gespielt.` });
+    toast('Erinnerung', j?.sent ? `an ${j.sent} Gerät${j.sent > 1 ? 'e' : ''} geschickt` : 'niemand hat Mitteilungen eingeschaltet', j?.sent ? '#5fd38a' : '#a7b3c2'); });
   on('cpAdmin', showLaneAdmin);
   const send = async () => { const x = ($('cpMsg').value || '').trim().slice(0, 200); if (!x || !COOP.tid) return; $('cpMsg').value = '';
     const m = { u: net.uid, nm: await getMyName(), x, t: Date.now() }; (COOP.chat = COOP.chat || []).push(m); coopDraw();
-    try { await withTimeout(cdoc('c/' + Date.now().toString(36) + '-' + String(net.uid).slice(-4)).set(m), 10000); } catch (e) { toast('Chat', 'Nachricht nicht gesendet', 'var(--red)'); } };
+    try { await withTimeout(cdoc('c/' + Date.now().toString(36) + '-' + String(net.uid).slice(-4)).set(m), 10000); window.__push?.team(COOP.tid, { kind: 'chat', title: `${COOP.team?.name || 'Team'} · ${m.nm}`, body: x }); } catch (e) { toast('Chat', 'Nachricht nicht gesendet', 'var(--red)'); } };
   on('cpSend', send); const mi = $('cpMsg'); if (mi) mi.onkeydown = e => { if (e.key === 'Enter') send(); };
   $('cpBody').querySelectorAll('[data-lv]').forEach(b => b.onclick = async () => {
     try { const t = await withTimeout(cdoc().get(), 10000); await withTimeout(cdoc().set({ ...t.data(), lvl: +b.dataset.lv }), 10000); } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
@@ -4812,6 +4825,64 @@ setTimeout(() => {
   if (window.__app.needLogin() && !(window.__app.cached() && (window.__app.cached().login || window.__app.cached().google))) { if (document.body) show(); else addEventListener('DOMContentLoaded', () => show()); }
   window.__app.init().then(check, check);
   addEventListener('online', () => { if (gate) show(); });
+})();
+
+// Push-Mitteilungen: einschalten (Hinweis nach der Anmeldung + Konto-Bildschirm), an Server melden, Team-Mitteilungen senden
+(function () {
+  const A = window.__app; if (!A) return;
+  const ok = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const b64 = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  async function subscribe() {
+    const reg = await navigator.serviceWorker.ready, { key } = await A.api('push/key', null, 'GET');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+    await A.api('push/subscribe', { sub: sub.toJSON() });
+    return sub;
+  }
+  window.__push = {
+    supported: ok,
+    state: () => !ok ? 'none' : Notification.permission,
+    enable: async () => { if (!ok) throw new Error('Mitteilungen gehen hier nicht'); const p = await Notification.requestPermission(); if (p !== 'granted') throw new Error('Mitteilungen nicht erlaubt'); await subscribe(); return true; },
+    disable: async () => { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (sub) { await A.api('push/unsubscribe', { endpoint: sub.endpoint }).catch(() => { }); await sub.unsubscribe(); } },
+    test: () => A.api('push/test', {}),
+    team: (tid, m) => A.api('push/team', { tid, ...m }).catch(() => { })
+  };
+  // schon erlaubt: Abo bei jedem Start dem angemeldeten Konto zuordnen
+  A.init().then(() => { if (ok && Notification.permission === 'granted') subscribe().catch(() => { }); }, () => { });
+  // Hinweis einmal nach der Anmeldung (iPhone: nur in der installierten App möglich)
+  const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  setTimeout(() => {
+    if (!ok || Notification.permission !== 'default' || !A.me() || (ios && !standalone)) return;
+    try { if (localStorage.getItem('9pinsim_pushAsk')) return; } catch (e) { }
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:75;background:rgba(18,24,33,.97);border:1px solid #e8b34a;border-radius:16px;padding:12px 14px;color:#eef2f6;font:15px Barlow,system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.45)';
+    d.innerHTML = '<b style="color:#e8b34a">🔔 Mitteilungen einschalten?</b><br><span style="color:#93a1b1;font-size:14px">Damit du weißt, wenn dein Coop-Duell ansteht, ein Spieltag ausgewertet ist oder dein Team schreibt.</span><div style="display:flex;gap:8px;margin-top:10px"><button id="puY" style="flex:1;padding:10px;border-radius:10px;border:0;background:#e8b34a;color:#111;font:700 15px Barlow,sans-serif">Einschalten</button><button id="puN" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1a2230;color:#eef2f6;font:600 15px Barlow,sans-serif">Später</button></div>';
+    document.body.appendChild(d);
+    const done = () => { d.remove(); try { localStorage.setItem('9pinsim_pushAsk', '1'); } catch (e) { } };
+    d.querySelector('#puY').onclick = () => { window.__push.enable().then(() => window.__push.test()).catch(() => { }); done(); };
+    d.querySelector('#puN').onclick = done;
+  }, 9000);
+  // Konto-Bildschirm: Schalter
+  const row = () => {
+    const box = document.getElementById('appAcc'); if (!box || box.querySelector('#puRow')) return;
+    const st = window.__push.state(), r = document.createElement('div'); r.id = 'puRow'; r.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.1)';
+    r.innerHTML = st === 'none' ? `<small>🔔 Mitteilungen: ${ios && !standalone ? 'erst in der installierten App (Teilen → Zum Home-Bildschirm)' : 'auf diesem Gerät nicht möglich'}</small>`
+      : st === 'denied' ? '<small>🔔 Mitteilungen sind in den Einstellungen des Handys/Browsers blockiert.</small>'
+      : `<b>🔔 Mitteilungen</b> <small>${st === 'granted' ? 'an' : 'aus'}</small><div class="row">${st === 'granted' ? '<button id="puT">Test senden</button><button id="puOff">Ausschalten</button>' : '<button class="pri" id="puOn">Einschalten</button>'}</div><div class="msg" id="puM"></div>`;
+    box.appendChild(r);
+    const m = r.querySelector('#puM'), redo = () => { r.remove(); row(); };
+    r.querySelector('#puOn') && (r.querySelector('#puOn').onclick = () => window.__push.enable().then(() => window.__push.test()).then(redo, e => { m.textContent = e.message; }));
+    r.querySelector('#puT') && (r.querySelector('#puT').onclick = () => window.__push.test().then(j => { m.style.color = '#5fd38a'; m.textContent = j.sent ? 'Gesendet ✓' : 'Kein Gerät angemeldet – bitte aus- und wieder einschalten'; }, e => { m.textContent = e.message; }));
+    r.querySelector('#puOff') && (r.querySelector('#puOff').onclick = () => window.__push.disable().then(redo));
+  };
+  const watchAcc = () => { const acc = document.getElementById('account'); if (!acc) return setTimeout(watchAcc, 500);
+    new MutationObserver(() => setTimeout(row, 50)).observe(acc, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }); };
+  watchAcc();
+  // Antippen einer Mitteilung: Coop-Liga öffnen
+  const openCoop = () => { const t = () => window.__sim?.coop?.showCoop ? window.__sim.coop.showCoop() : setTimeout(t, 500); t(); };
+  if (location.hash === '#coop') { history.replaceState(null, '', location.pathname); setTimeout(openCoop, 1500); }
+  navigator.serviceWorker?.addEventListener('message', e => { if (e.data?.open === 'coop') openCoop(); });
 })();
 
 </script>

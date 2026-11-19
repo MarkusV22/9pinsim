@@ -1,3 +1,4 @@
+import { vapidKeys, pushTo } from './push.js';
 // 9PinSim-Server: Konten, Dokumentspeicher (wie die Claude-Datenbank) und Echtzeit-Räume (wie die Claude-Presence).
 // Die App bindet das über einen kleinen Ersatz für window.claude ein – das Spiel selbst bleibt unverändert.
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
@@ -80,6 +81,26 @@ async function api(req, env, url) {
     const ids = String(url.searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 50), out = {};
     if (ids.length) { const r = await env.DB.prepare(`SELECT id, nick FROM users WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all(); for (const x of r.results) out[x.id] = { name: x.nick }; }
     return J(out);
+  }
+  // --- Push-Mitteilungen ---
+  if (p === 'push/key') return J({ key: (await vapidKeys(env)).pub });
+  if (p === 'push/subscribe') {
+    const sub = body.sub || {}, ep = String(sub.endpoint || '');
+    if (!/^https:\/\//.test(ep) || ep.length > 800 || !sub.keys?.p256dh || !sub.keys?.auth) return J({ error: 'Abo' }, 400);
+    await env.DB.prepare('INSERT INTO push_subs (endpoint, user_id, p256dh, auth, created) VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth')
+      .bind(ep, u.id, String(sub.keys.p256dh).slice(0, 200), String(sub.keys.auth).slice(0, 100), Date.now()).run();
+    return J({ ok: true });
+  }
+  if (p === 'push/unsubscribe') { await env.DB.prepare('DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?').bind(String(body.endpoint || ''), u.id).run(); return J({ ok: true }); }
+  if (p === 'push/test') return J({ sent: await pushTo(env, [u.id], { title: '9PinSim', body: 'Mitteilungen sind eingeschaltet ✓', tag: 'test', url: '/' }) });
+  if (p === 'push/team') {   // an Mitglieder eines Coop-Teams (nur wer selbst Mitglied ist)
+    const tid = String(body.tid || ''); if (!/^[A-Z0-9]{6}$/.test(tid)) return J({ error: 'Team' }, 400);
+    const mem = (await env.DB.prepare('SELECT id FROM docs WHERE parent = ?').bind('coop/' + tid + '/m').all()).results.map(x => x.id);
+    if (!mem.includes(u.id)) return J({ error: 'kein Mitglied' }, 403);
+    let to = mem.filter(x => x !== u.id);
+    if (Array.isArray(body.only)) to = to.filter(x => body.only.includes(x));
+    const msg = { title: clean(body.title, 60) || '9PinSim', body: clean(body.body, 180), tag: 'coop-' + tid + (body.kind ? '-' + clean(body.kind, 12) : ''), url: '/#coop' };
+    return J({ sent: await pushTo(env, to, msg) });
   }
   // --- Dokumente ---
   if (p === 'db/get') {

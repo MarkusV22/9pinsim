@@ -113,6 +113,7 @@
     setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } },
     google: () => { location.href = API + 'auth/google/start' + (token ? '?token=' + encodeURIComponent(token) : ''); },
     gErr: () => { const e = gErr; gErr = ''; return e; },
-    peekGErr: () => gErr
+    peekGErr: () => gErr,
+    api: (path, body, method) => call(path, body, method)
   };
 })();

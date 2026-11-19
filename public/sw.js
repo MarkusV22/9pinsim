@@ -1,5 +1,5 @@
 // Service Worker: App offline verfügbar, Updates beim nächsten Start
-const V = '9pinsim-571b6a7663', ASSETS = ["./", "./icons/apple-180.png", "./icons/favicon-64.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./index.html", "./manifest.webmanifest", "./vendor/addons/environments/RoomEnvironment.js", "./vendor/cannon-es.js", "./vendor/three.module.min.js"];
+const V = '9pinsim-07973d2267', ASSETS = ["./", "./icons/apple-180.png", "./icons/favicon-64.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./index.html", "./manifest.webmanifest", "./vendor/addons/environments/RoomEnvironment.js", "./vendor/cannon-es.js", "./vendor/three.module.min.js"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V && k !== 'fonts').map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
@@ -15,4 +15,18 @@ self.addEventListener('fetch', e => {
     return;
   }
   e.respondWith(caches.match(r).then(m => m || fetch(r)));
+});
+// Push-Mitteilungen
+self.addEventListener('push', e => {
+  let m = {}; try { m = e.data ? e.data.json() : {}; } catch (x) { m = { title: '9PinSim', body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(m.title || '9PinSim', { body: m.body || '', tag: m.tag || undefined, renotify: !!m.tag, icon: './icons/icon-192.png', badge: './icons/favicon-64.png', data: { url: m.url || '/' } }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || '/', self.location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    const c = cs.find(x => x.url.startsWith(self.location.origin));
+    if (c) { c.postMessage({ open: new URL(url).hash.slice(1) }); return c.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });

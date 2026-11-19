@@ -139,3 +139,61 @@ setTimeout(() => {
   window.__app.init().then(check, check);
   addEventListener('online', () => { if (gate) show(); });
 })();
+
+// Push-Mitteilungen: einschalten (Hinweis nach der Anmeldung + Konto-Bildschirm), an Server melden, Team-Mitteilungen senden
+(function () {
+  const A = window.__app; if (!A) return;
+  const ok = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const b64 = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  async function subscribe() {
+    const reg = await navigator.serviceWorker.ready, { key } = await A.api('push/key', null, 'GET');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+    await A.api('push/subscribe', { sub: sub.toJSON() });
+    return sub;
+  }
+  window.__push = {
+    supported: ok,
+    state: () => !ok ? 'none' : Notification.permission,
+    enable: async () => { if (!ok) throw new Error('Mitteilungen gehen hier nicht'); const p = await Notification.requestPermission(); if (p !== 'granted') throw new Error('Mitteilungen nicht erlaubt'); await subscribe(); return true; },
+    disable: async () => { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (sub) { await A.api('push/unsubscribe', { endpoint: sub.endpoint }).catch(() => { }); await sub.unsubscribe(); } },
+    test: () => A.api('push/test', {}),
+    team: (tid, m) => A.api('push/team', { tid, ...m }).catch(() => { })
+  };
+  // schon erlaubt: Abo bei jedem Start dem angemeldeten Konto zuordnen
+  A.init().then(() => { if (ok && Notification.permission === 'granted') subscribe().catch(() => { }); }, () => { });
+  // Hinweis einmal nach der Anmeldung (iPhone: nur in der installierten App möglich)
+  const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  setTimeout(() => {
+    if (!ok || Notification.permission !== 'default' || !A.me() || (ios && !standalone)) return;
+    try { if (localStorage.getItem('9pinsim_pushAsk')) return; } catch (e) { }
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:75;background:rgba(18,24,33,.97);border:1px solid #e8b34a;border-radius:16px;padding:12px 14px;color:#eef2f6;font:15px Barlow,system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.45)';
+    d.innerHTML = '<b style="color:#e8b34a">🔔 Mitteilungen einschalten?</b><br><span style="color:#93a1b1;font-size:14px">Damit du weißt, wenn dein Coop-Duell ansteht, ein Spieltag ausgewertet ist oder dein Team schreibt.</span><div style="display:flex;gap:8px;margin-top:10px"><button id="puY" style="flex:1;padding:10px;border-radius:10px;border:0;background:#e8b34a;color:#111;font:700 15px Barlow,sans-serif">Einschalten</button><button id="puN" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:#1a2230;color:#eef2f6;font:600 15px Barlow,sans-serif">Später</button></div>';
+    document.body.appendChild(d);
+    const done = () => { d.remove(); try { localStorage.setItem('9pinsim_pushAsk', '1'); } catch (e) { } };
+    d.querySelector('#puY').onclick = () => { window.__push.enable().then(() => window.__push.test()).catch(() => { }); done(); };
+    d.querySelector('#puN').onclick = done;
+  }, 9000);
+  // Konto-Bildschirm: Schalter
+  const row = () => {
+    const box = document.getElementById('appAcc'); if (!box || box.querySelector('#puRow')) return;
+    const st = window.__push.state(), r = document.createElement('div'); r.id = 'puRow'; r.style.cssText = 'margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.1)';
+    r.innerHTML = st === 'none' ? `<small>🔔 Mitteilungen: ${ios && !standalone ? 'erst in der installierten App (Teilen → Zum Home-Bildschirm)' : 'auf diesem Gerät nicht möglich'}</small>`
+      : st === 'denied' ? '<small>🔔 Mitteilungen sind in den Einstellungen des Handys/Browsers blockiert.</small>'
+      : `<b>🔔 Mitteilungen</b> <small>${st === 'granted' ? 'an' : 'aus'}</small><div class="row">${st === 'granted' ? '<button id="puT">Test senden</button><button id="puOff">Ausschalten</button>' : '<button class="pri" id="puOn">Einschalten</button>'}</div><div class="msg" id="puM"></div>`;
+    box.appendChild(r);
+    const m = r.querySelector('#puM'), redo = () => { r.remove(); row(); };
+    r.querySelector('#puOn') && (r.querySelector('#puOn').onclick = () => window.__push.enable().then(() => window.__push.test()).then(redo, e => { m.textContent = e.message; }));
+    r.querySelector('#puT') && (r.querySelector('#puT').onclick = () => window.__push.test().then(j => { m.style.color = '#5fd38a'; m.textContent = j.sent ? 'Gesendet ✓' : 'Kein Gerät angemeldet – bitte aus- und wieder einschalten'; }, e => { m.textContent = e.message; }));
+    r.querySelector('#puOff') && (r.querySelector('#puOff').onclick = () => window.__push.disable().then(redo));
+  };
+  const watchAcc = () => { const acc = document.getElementById('account'); if (!acc) return setTimeout(watchAcc, 500);
+    new MutationObserver(() => setTimeout(row, 50)).observe(acc, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }); };
+  watchAcc();
+  // Antippen einer Mitteilung: Coop-Liga öffnen
+  const openCoop = () => { const t = () => window.__sim?.coop?.showCoop ? window.__sim.coop.showCoop() : setTimeout(t, 500); t(); };
+  if (location.hash === '#coop') { history.replaceState(null, '', location.pathname); setTimeout(openCoop, 1500); }
+  navigator.serviceWorker?.addEventListener('message', e => { if (e.data?.open === 'coop') openCoop(); });
+})();

@@ -3820,6 +3820,12 @@ async function coopFreeze() {
     if (x) res[u] = { s: x.s, os: x.os, sp: x.sp ?? null, osp: x.osp ?? null, a: x.a || [x.s], b: x.b || [x.os], quit: x.quit ? 1 : 0 }; });
   const pad = Array.from({ length: COOP_POS }, (_, k) => line[k] || '');
   await withTimeout(cdoc(`d/${no}-${d}`).set({ se: no, day: d, line: pad, res, names, lvl: COOP.S.lvl | 0, t: Date.now(), by: net.uid }), 10000);
+  try {   // Mitteilung an das Team: Ergebnis + nächster Spieltag offen
+    const S = COOP.S, mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), m = coopMatch(S, d, mi, { line: pad, res, names, lvl: S.lvl | 0 });
+    const usA = m.a === 0, our = usA ? m.mpA : m.mpB, their = usA ? m.mpB : m.mpA, opp = S.teams[usA ? m.b : m.a].name;
+    window.__push?.team(COOP.tid, { kind: 'day', title: `Spieltag ${d + 1}: ${spTxt(our)} : ${spTxt(their)} gegen ${opp}`,
+      body: (our > their ? 'Sieg! 🎉 ' : our < their ? 'Niederlage. ' : 'Unentschieden. ') + (d + 1 < COOP_DAYS ? `Spieltag ${d + 2} ist offen – dein Duell wartet.` : 'Die Saison ist zu Ende – schau dir die Tabelle an.') });
+  } catch (e) { }
   return coopLoad();
 }
 async function coopSeasonEnd() {
@@ -3890,6 +3896,7 @@ function coopDraw() {
   else h += `<div class="tag">Dein Duell ist gespielt. Warte auf: ${esc(wait.join(', ') || '–')}</div>`;
   h += `<div class="tag" style="margin:6px 0 0;font-size:13px">Gegnerstärke: <b>${COOP_LVLS[S.lvl][1]}</b>${S.lvl ? ' (Schnitte der Gegner × ' + lvlF(S.lvl) + ')' : ' (echte Schnitte)'}${cap ? ' – als Kapitän hier einstellbar' : ''}</div>`;
   if (cap) h += `<div class="cpLv">${COOP_LVLS.map(([, n], i) => `<button class="${i === S.lvl ? 'on' : ''}" data-lv="${i}">${n}</button>`).join('')}</div>`;
+  if (cap && wait.length && window.__push) h += `<button class="btn" id="cpRemind">Erinnerung schicken <small>an ${wait.length === 1 ? esc(wait[0]) : wait.length + ' Spieler'}</small></button>`;
   if (cap) h += `<button class="btn" id="cpClose">Spieltag abschließen <small>${wait.length ? 'fehlende Duelle werden simuliert' : ''}</small></button>`;
   h += '</div>';
   // Tabelle
@@ -3915,10 +3922,15 @@ function coopBind() {
   $('cpBody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => coopCreate(+b.dataset.f));
   on('cpJoin', () => coopJoin(($('cpCode').value || '').trim().toUpperCase()));
   on('cpPlay', coopPlay);
+  on('cpRemind', async () => {   // Kapitän erinnert, wer noch nicht gespielt hat
+    const S = COOP.S, d = COOP.day, line = coopLine(), only = line.filter(u => !COOP.res.some(x => x.uid === u));
+    const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), opp = S.teams[a === 0 ? b : a].name;
+    const j = await window.__push.team(COOP.tid, { kind: 'remind', only, title: 'Coop-Liga: dein Duell wartet', body: `Spieltag ${d + 1} gegen ${opp} – ${line.length - only.length} von ${line.length} haben schon gespielt.` });
+    toast('Erinnerung', j?.sent ? `an ${j.sent} Gerät${j.sent > 1 ? 'e' : ''} geschickt` : 'niemand hat Mitteilungen eingeschaltet', j?.sent ? '#5fd38a' : '#a7b3c2'); });
   on('cpAdmin', showLaneAdmin);
   const send = async () => { const x = ($('cpMsg').value || '').trim().slice(0, 200); if (!x || !COOP.tid) return; $('cpMsg').value = '';
     const m = { u: net.uid, nm: await getMyName(), x, t: Date.now() }; (COOP.chat = COOP.chat || []).push(m); coopDraw();
-    try { await withTimeout(cdoc('c/' + Date.now().toString(36) + '-' + String(net.uid).slice(-4)).set(m), 10000); } catch (e) { toast('Chat', 'Nachricht nicht gesendet', 'var(--red)'); } };
+    try { await withTimeout(cdoc('c/' + Date.now().toString(36) + '-' + String(net.uid).slice(-4)).set(m), 10000); window.__push?.team(COOP.tid, { kind: 'chat', title: `${COOP.team?.name || 'Team'} · ${m.nm}`, body: x }); } catch (e) { toast('Chat', 'Nachricht nicht gesendet', 'var(--red)'); } };
   on('cpSend', send); const mi = $('cpMsg'); if (mi) mi.onkeydown = e => { if (e.key === 'Enter') send(); };
   $('cpBody').querySelectorAll('[data-lv]').forEach(b => b.onclick = async () => {
     try { const t = await withTimeout(cdoc().get(), 10000); await withTimeout(cdoc().set({ ...t.data(), lvl: +b.dataset.lv }), 10000); } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
