@@ -11,5 +11,5 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   // Admin (Vereinsbahnen bearbeiten, Fehlerprotokoll lesen): Anmeldenamen bzw. Google-E-Mails, kommagetrennt
   // Google-Anmeldung: Secrets GOOGLE_CLIENT_ID und GOOGLE_CLIENT_SECRET (setzt die GitHub Action)
-  "vars": { "ADMIN_LOGINS": "markus", "ADMIN_EMAILS": "" }
+  "vars": { "ADMIN_LOGINS": "markus", "ADMIN_EMAILS": "vsetecka.markus@gmail.com" }
 }
