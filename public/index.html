@@ -9,8 +9,17 @@
 (function () {
   if (window.claude) return;
   const API = location.origin + '/api/', TK = '9pinsim_token';
-  let token = null, me = null, ready = null;
+  let token = null, me = null, ready = null, gErr = '';
   try { token = localStorage.getItem(TK); } catch (e) { }
+  // Rückkehr von der Google-Anmeldung: /#login=<token>[&linked=1] oder /#gerr=<Meldung>
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get('login')) {
+      if (!h.get('linked')) Object.keys(localStorage).forEach(k => { if (k.startsWith('9pinsim_') && !['9pinsim_quality', '9pinsim_tut', '9pinsim_welcome', '9pinsim_instX'].includes(k)) localStorage.removeItem(k); });   // anderes Konto: lokaler Stand weicht dem Konto
+      token = h.get('login'); localStorage.setItem(TK, token); localStorage.setItem('9pinsim_welcome', 'true');
+      sessionStorage.setItem('9pinsim_gok', '1'); history.replaceState(null, '', location.pathname);
+    } else if (h.get('gerr')) { gErr = h.get('gerr'); history.replaceState(null, '', location.pathname); }
+  } catch (e) { }
   const nick = () => { try { return JSON.parse(localStorage.getItem('9pinsim_nick') || '""') || ''; } catch (e) { return ''; } };
   async function call(path, body, method = 'POST') {
     const r = await fetch(API + path, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: method === 'POST' ? JSON.stringify(body || {}) : undefined });
@@ -99,7 +108,10 @@
     claim: async (login, pass) => { const j = await call('auth/claim', { login, pass }); me = j.user; return me; },
     login: async (login, pass) => { const j = await call('auth/login', { login, pass }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } return me; },
     logout: async () => { try { await call('auth/logout', {}); } catch (e) { } try { localStorage.removeItem(TK); } catch (e) { } token = null; me = null; },
-    setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } }
+    setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } },
+    google: () => { location.href = API + 'auth/google/start' + (token ? '?token=' + encodeURIComponent(token) : ''); },
+    gErr: () => { const e = gErr; gErr = ''; return e; },
+    peekGErr: () => gErr
   };
 })();
 
@@ -4686,7 +4698,7 @@ window.__sim = { get fallenEver() { return fallenEver; }, advanceSim, setDebugCa
 (function () {
   if (!window.__app) return;
   const css = document.createElement('style');
-  css.textContent = '#appAcc{width:min(400px,100%);margin:10px 0;background:#121821;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px;font:15px Barlow,system-ui,sans-serif;color:#eef2f6}#appAcc b{color:#e8b34a}#appAcc input{width:100%;box-sizing:border-box;margin:6px 0;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b0f14;color:#eef2f6;font:16px Barlow,system-ui,sans-serif}#appAcc .row{display:flex;gap:8px;margin-top:6px}#appAcc button{flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#1a2230;color:#eef2f6;font:600 15px Barlow,system-ui,sans-serif}#appAcc button.pri{background:#e8b34a;color:#111;border-color:#e8b34a}#appAcc .msg{color:#ff6b5e;font-size:13px;min-height:1em}#appAcc small{color:#93a1b1}';
+  css.textContent = '#appAcc{width:min(400px,100%);margin:10px 0;background:#121821;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 14px;font:15px Barlow,system-ui,sans-serif;color:#eef2f6}#appAcc b{color:#e8b34a}#appAcc input{width:100%;box-sizing:border-box;margin:6px 0;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0b0f14;color:#eef2f6;font:16px Barlow,system-ui,sans-serif}#appAcc .row{display:flex;gap:8px;margin-top:6px}#appAcc button{flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#1a2230;color:#eef2f6;font:600 15px Barlow,system-ui,sans-serif}#appAcc button.pri{background:#e8b34a;color:#111;border-color:#e8b34a}#appAcc .msg{color:#ff6b5e;font-size:13px;min-height:1em}#appAcc small{color:#93a1b1}#appAcc .gBtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:6px;background:#fff;color:#1f1f1f;border-color:#dadce0}#appAcc .or{text-align:center;color:#93a1b1;font-size:13px;margin:10px 0 2px}';
   document.head.appendChild(css);
   let mode = 'claim';
   function render() {
@@ -4695,19 +4707,26 @@ window.__sim = { get fallenEver() { return fallenEver; }, advanceSim, setDebugCa
     if (!box) { box = document.createElement('div'); box.id = 'appAcc'; const st = document.getElementById('accState'); st.parentNode.insertBefore(box, st.nextSibling); }
     const me = window.__app.me();
     if (!me) { box.innerHTML = 'Keine Verbindung zum Server – Konto-Funktionen gehen gerade nicht.'; return; }
-    if (me.login) {
-      box.innerHTML = `Angemeldet als <b>${me.login}</b>${me.admin ? ' (Admin)' : ''}.<br><small>Auf einem anderen Gerät mit diesem Namen und deinem Passwort anmelden – alles ist dann dort auch.</small><div class="row"><button id="aaOut">Abmelden</button></div>`;
+    const gBtn = `<button class="gBtn" id="aaG"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Mit Google anmelden</button>`;
+    const ge = window.__app.gErr?.(); const gMsg = ge ? `<div class="msg">Google: ${ge}</div>` : '';
+    if (me.login || me.google) {
+      box.innerHTML = `Angemeldet als <b>${me.login || me.email || me.name}</b>${me.admin ? ' (Admin)' : ''}${me.google ? `<br><small>✓ mit Google verbunden${me.email ? ' (' + me.email + ')' : ''}</small>` : ''}<br><small>Auf einem anderen Gerät ${me.google ? 'mit Google' : 'mit diesem Namen und deinem Passwort'} anmelden – alles ist dann dort auch.</small>${gMsg}
+        <div class="row">${me.google ? '' : gBtn.replace('Mit Google anmelden', 'Google verbinden')}<button id="aaOut">Abmelden</button></div>`;
+      const g = box.querySelector('#aaG'); if (g) g.onclick = () => window.__app.google();
       box.querySelector('#aaOut').onclick = async () => { if (!confirm('Abmelden? Auf diesem Gerät startet dann ein neues Gastkonto.')) return; await window.__app.logout(); location.reload(); };
       return;
     }
     box.innerHTML = mode === 'claim'
       ? `<b>Konto sichern</b><br><small>Du spielst mit einem Gastkonto auf diesem Gerät. Mit Anmeldename und Passwort bleibt dein Fortschritt erhalten und du kannst dich auf anderen Geräten anmelden.</small>
         <input id="aaL" placeholder="Anmeldename (z. B. markus)" autocomplete="username" autocapitalize="off"><input id="aaP" type="password" placeholder="Passwort (mind. 6 Zeichen)" autocomplete="new-password">
-        <div class="msg" id="aaM"></div><div class="row"><button class="pri" id="aaGo">Konto sichern</button><button id="aaSw">Ich habe schon ein Konto</button></div>`
+        <div class="msg" id="aaM"></div><div class="row"><button class="pri" id="aaGo">Konto sichern</button><button id="aaSw">Ich habe schon ein Konto</button></div>
+        <div class="or">oder</div>${gBtn}<small>Mit Google wird dein Gast-Fortschritt in dein Google-Konto übernommen.</small>${gMsg}`
       : `<b>Anmelden</b><br><small>Mit deinem Anmeldenamen und Passwort. Der Gast-Fortschritt auf diesem Gerät wird dabei durch dein Konto ersetzt.</small>
         <input id="aaL" placeholder="Anmeldename" autocomplete="username" autocapitalize="off"><input id="aaP" type="password" placeholder="Passwort" autocomplete="current-password">
-        <div class="msg" id="aaM"></div><div class="row"><button class="pri" id="aaGo">Anmelden</button><button id="aaSw">Zurück</button></div>`;
+        <div class="msg" id="aaM"></div><div class="row"><button class="pri" id="aaGo">Anmelden</button><button id="aaSw">Zurück</button></div>
+        <div class="or">oder</div>${gBtn}${gMsg}`;
     box.querySelector('#aaSw').onclick = () => { mode = mode === 'claim' ? 'login' : 'claim'; render(); };
+    box.querySelector('#aaG').onclick = () => window.__app.google();
     box.querySelector('#aaGo').onclick = async () => {
       const l = box.querySelector('#aaL').value.trim(), p = box.querySelector('#aaP').value, m = box.querySelector('#aaM'); m.textContent = '';
       try {
@@ -4723,6 +4742,15 @@ window.__sim = { get fallenEver() { return fallenEver; }, advanceSim, setDebugCa
   let last = null;
   setInterval(() => { let n = ''; try { n = JSON.parse(localStorage.getItem('9pinsim_nick') || '""'); } catch (e) { } if (n && n !== last && window.__app.me()) { last = n; window.__app.setName(n); } }, 5000);
 })();
+
+// Meldung nach Rückkehr von Google (Fehler oder erfolgreich angemeldet)
+setTimeout(() => {
+  const e = window.__app?.peekGErr?.(), ok = sessionStorage.getItem('9pinsim_gok');
+  if (!e && !ok) return; sessionStorage.removeItem('9pinsim_gok');
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));z-index:80;background:rgba(18,24,33,.97);border:1px solid ' + (e ? '#ff6b5e' : '#5fd38a') + ';border-radius:14px;padding:12px 14px;color:#eef2f6;font:15px Barlow,system-ui,sans-serif';
+  d.textContent = e ? 'Google-Anmeldung: ' + e : '✓ Mit Google angemeldet'; document.body.appendChild(d); setTimeout(() => d.remove(), 5000);
+}, 1500);
 
 </script>
 </body>

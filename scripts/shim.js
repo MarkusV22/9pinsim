@@ -4,8 +4,17 @@
 (function () {
   if (window.claude) return;
   const API = location.origin + '/api/', TK = '9pinsim_token';
-  let token = null, me = null, ready = null;
+  let token = null, me = null, ready = null, gErr = '';
   try { token = localStorage.getItem(TK); } catch (e) { }
+  // Rückkehr von der Google-Anmeldung: /#login=<token>[&linked=1] oder /#gerr=<Meldung>
+  try {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (h.get('login')) {
+      if (!h.get('linked')) Object.keys(localStorage).forEach(k => { if (k.startsWith('9pinsim_') && !['9pinsim_quality', '9pinsim_tut', '9pinsim_welcome', '9pinsim_instX'].includes(k)) localStorage.removeItem(k); });   // anderes Konto: lokaler Stand weicht dem Konto
+      token = h.get('login'); localStorage.setItem(TK, token); localStorage.setItem('9pinsim_welcome', 'true');
+      sessionStorage.setItem('9pinsim_gok', '1'); history.replaceState(null, '', location.pathname);
+    } else if (h.get('gerr')) { gErr = h.get('gerr'); history.replaceState(null, '', location.pathname); }
+  } catch (e) { }
   const nick = () => { try { return JSON.parse(localStorage.getItem('9pinsim_nick') || '""') || ''; } catch (e) { return ''; } };
   async function call(path, body, method = 'POST') {
     const r = await fetch(API + path, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) }, body: method === 'POST' ? JSON.stringify(body || {}) : undefined });
@@ -94,6 +103,9 @@
     claim: async (login, pass) => { const j = await call('auth/claim', { login, pass }); me = j.user; return me; },
     login: async (login, pass) => { const j = await call('auth/login', { login, pass }); token = j.token; me = j.user; try { localStorage.setItem(TK, token); } catch (e) { } return me; },
     logout: async () => { try { await call('auth/logout', {}); } catch (e) { } try { localStorage.removeItem(TK); } catch (e) { } token = null; me = null; },
-    setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } }
+    setName: async n => { try { me = (await call('me', { name: n })).user; } catch (e) { } },
+    google: () => { location.href = API + 'auth/google/start' + (token ? '?token=' + encodeURIComponent(token) : ''); },
+    gErr: () => { const e = gErr; gErr = ''; return e; },
+    peekGErr: () => gErr
   };
 })();

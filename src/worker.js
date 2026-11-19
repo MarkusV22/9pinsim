@@ -9,8 +9,9 @@ async function pbkdf2(pass, salt) {
   return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, n);
-const isAdmin = (env, u) => !!u?.login && String(env.ADMIN_LOGINS || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean).includes(u.login);
-const pub = (env, u) => ({ id: u.id, name: u.nick, login: u.login || null, admin: isAdmin(env, u) });
+const list = v => String(v || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+const isAdmin = (env, u) => (!!u?.login && list(env.ADMIN_LOGINS).includes(u.login)) || (!!u?.email && list(env.ADMIN_EMAILS).includes(String(u.email).toLowerCase()));
+const pub = (env, u) => ({ id: u.id, name: u.nick, login: u.login || null, google: !!u.google_sub, email: u.email || null, admin: isAdmin(env, u) });
 
 async function userFrom(req, env) {
   const h = req.headers.get('authorization') || '', url = new URL(req.url);
@@ -45,6 +46,8 @@ async function api(req, env, url) {
     await env.DB.prepare('INSERT INTO users (id, nick, created) VALUES (?, ?, ?)').bind(id, nick, Date.now()).run();
     return J({ token: await newSession(env, id), user: { id, name: nick, login: null, admin: false } });
   }
+  if (p === 'auth/google/start') return googleStart(req, env, url);
+  if (p === 'auth/google/callback') return googleCallback(req, env, url);
   if (p === 'auth/login') {
     const login = clean(body.login, 24).toLowerCase(), u = login && await env.DB.prepare('SELECT * FROM users WHERE login = ?').bind(login).first();
     if (!u || !u.pass || await pbkdf2(String(body.pass || ''), u.salt) !== u.pass) return J({ error: 'Name oder Passwort falsch' }, 401);
@@ -112,6 +115,47 @@ async function api(req, env, url) {
     return stub.fetch(new Request('https://room/ws', { headers: h }));
   }
   return J({ error: 'unbekannt' }, 404);
+}
+
+
+// ---------- Google-Anmeldung (OAuth, Weiterleitung) ----------
+// /api/auth/google/start?token=… → Google → /api/auth/google/callback → zurück in die App mit /#login=<token>
+// Ist das Google-Konto schon verbunden: Anmeldung in dieses Konto. Sonst wird es mit dem aktuellen (Gast-)Konto verbunden.
+async function googleStart(req, env, url) {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return J({ error: 'Google-Anmeldung ist noch nicht eingerichtet' }, 503);
+  const cur = await userFrom(req, env), state = rnd(16);
+  await env.DB.prepare('DELETE FROM oauth_state WHERE created < ?').bind(Date.now() - 15 * 60e3).run();
+  await env.DB.prepare('INSERT INTO oauth_state (state, user_id, created) VALUES (?, ?, ?)').bind(state, cur?.id || null, Date.now()).run();
+  const q = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, redirect_uri: url.origin + '/api/auth/google/callback', response_type: 'code',
+    scope: 'openid email profile', state, prompt: 'select_account' });
+  return Response.redirect('https://accounts.google.com/o/oauth2/v2/auth?' + q, 302);
+}
+async function googleCallback(req, env, url) {
+  const back = (msg) => Response.redirect(url.origin + '/#' + msg, 302);
+  const code = url.searchParams.get('code'), state = url.searchParams.get('state');
+  if (!code || !state) return back('gerr=' + encodeURIComponent(url.searchParams.get('error') || 'abgebrochen'));
+  const st = await env.DB.prepare('SELECT * FROM oauth_state WHERE state = ?').bind(state).first();
+  await env.DB.prepare('DELETE FROM oauth_state WHERE state = ?').bind(state).run();
+  if (!st || Date.now() - st.created > 15 * 60e3) return back('gerr=' + encodeURIComponent('Anmeldung abgelaufen – bitte nochmal'));
+  const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: url.origin + '/api/auth/google/callback', grant_type: 'authorization_code' }) });
+  const tk = await r.json().catch(() => ({}));
+  if (!tk.id_token) return back('gerr=' + encodeURIComponent('Google hat die Anmeldung abgelehnt'));
+  // id_token kommt direkt von Google (TLS + Client-Secret) → Inhalt lesen genügt
+  const pl = JSON.parse(atob(tk.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+  if (pl.aud !== env.GOOGLE_CLIENT_ID || !pl.sub) return back('gerr=' + encodeURIComponent('ungültige Antwort von Google'));
+  const email = String(pl.email || '').toLowerCase().slice(0, 120), gname = clean(pl.given_name || pl.name, 18);
+  let u = await env.DB.prepare('SELECT * FROM users WHERE google_sub = ?').bind(pl.sub).first(), linked = 0;
+  if (!u && st.user_id) {
+    const cur = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(st.user_id).first();
+    if (cur && !cur.google_sub) { await env.DB.prepare('UPDATE users SET google_sub = ?, email = ? WHERE id = ?').bind(pl.sub, email, cur.id).run(); u = cur; linked = 1; }
+  }
+  if (!u) {
+    const id = 'u' + rnd(8);
+    await env.DB.prepare('INSERT INTO users (id, nick, google_sub, email, created) VALUES (?, ?, ?, ?, ?)').bind(id, gname || 'Spieler', pl.sub, email, Date.now()).run();
+    u = { id };
+  }
+  return back('login=' + await newSession(env, u.id) + (linked ? '&linked=1' : ''));
 }
 
 export default {

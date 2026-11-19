@@ -9,6 +9,7 @@
   "d1_databases": [{ "binding": "DB", "database_name": "9pinsim", "database_id": "LOCAL-ONLY-REPLACE-AFTER-wrangler-d1-create", "migrations_dir": "migrations" }],
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
-  // Admin (Vereinsbahnen bearbeiten, Fehlerprotokoll lesen): Anmeldenamen, kommagetrennt
-  "vars": { "ADMIN_LOGINS": "markus" }
+  // Admin (Vereinsbahnen bearbeiten, Fehlerprotokoll lesen): Anmeldenamen bzw. Google-E-Mails, kommagetrennt
+  // Google-Anmeldung: Secrets GOOGLE_CLIENT_ID und GOOGLE_CLIENT_SECRET (setzt die GitHub Action)
+  "vars": { "ADMIN_LOGINS": "markus", "ADMIN_EMAILS": "" }
 }

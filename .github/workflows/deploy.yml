@@ -1,5 +1,6 @@
 # Veröffentlicht 9PinSim auf Cloudflare bei jedem Push auf main.
 # Benötigte Repository-Secrets (gleiche Werte wie bei 9pinfantasy): CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+# Optional für die Google-Anmeldung: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 name: Veröffentlichen
 on:
   push:
@@ -26,3 +27,14 @@ jobs:
         run: npx --yes wrangler@4 d1 migrations apply 9pinsim --remote
       - name: Veröffentlichen
         run: npx --yes wrangler@4 deploy
+      - name: Google-Schlüssel setzen
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]; then
+            printf '%s' "$GOOGLE_CLIENT_ID" | npx --yes wrangler@4 secret put GOOGLE_CLIENT_ID
+            printf '%s' "$GOOGLE_CLIENT_SECRET" | npx --yes wrangler@4 secret put GOOGLE_CLIENT_SECRET
+          else
+            echo "Google-Anmeldung noch nicht eingerichtet (Secrets fehlen)"
+          fi
