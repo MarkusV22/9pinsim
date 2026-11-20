@@ -228,6 +228,8 @@ h2{font-family:"Barlow Condensed";font-weight:800;font-size:30px;letter-spacing:
 .newT{font-style:normal;background:var(--acc);color:#111;border-radius:6px;padding:1px 6px;font-size:11px;margin-right:4px}
 .hlT{color:var(--acc)!important}
 .cpLane{margin:0 0 8px!important;font-size:13px}
+#cpHome{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;width:100%}#cpHome button{flex:0 0 auto;max-width:190px;text-align:left;padding:8px 11px;border-radius:12px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:13px}
+#cpHome button b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#cpHome button small{color:#a7b3c2;font-size:11px}#cpHome button.on{border-color:var(--acc);background:rgba(232,179,74,.18)}
 .cpLv{display:flex;gap:6px;margin:8px 0 4px}.cpLv button{flex:1;padding:8px 0;border-radius:10px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:13px}.cpLv button.on{border-color:var(--acc);background:rgba(232,179,74,.18)}
 #unlock{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);opacity:0;transition:all .35s;z-index:12;background:rgba(16,22,31,.96);border:1px solid rgba(232,179,74,.6);border-radius:14px;padding:10px 16px;font-size:14px;pointer-events:none;white-space:nowrap}
 #unlock.on{opacity:1;transform:translateX(-50%)}#unlock b{color:var(--acc)}
@@ -3588,7 +3590,7 @@ const SL_LANES = {
   "SKC Sonnensee Ritzing": { bahn: "BLZ Ritzing", idx: -10.3, n: 1365, avg: 570.6, look: 2 }
 };
 const LANE_W = .75;   // wie 9pinfantasy-Prognose: 75 % des Bahnindex wirken auf jeden Spieler
-const laneAdj = (S, t) => t === 0 ? 0 : LANE_W * (SL_LANES[S.teams[t].name]?.idx || 0);
+const laneAdj = (S, t, fr) => { const c = t === 0 ? (fr ? fr.home : S.home) : S.teams[t].name; return c ? LANE_W * (SL_LANES[c]?.idx || 0) : 0; };   // Heimbahn des Teams: eigene (0) oder gewählte Vereinsbahn
 // Kegelstand nach Bahnindex: gemessen ~0,6 Kegel/Volle-Wurf zwischen griffig und sehr rutschig (≈ 40 Kegel auf 120 Wurf)
 const laneSlip = idx => clamp(.6 + LANE_W * idx / 40, .05, 1);
 const laneWord = idx => idx >= 15 ? 'geht sehr gut' : idx >= 5 ? 'geht gut' : idx > -5 ? 'durchschnittlich' : idx > -12 ? 'eher schwer' : 'schwer';
@@ -3644,7 +3646,7 @@ const flipDuel = d => ({ ...d, s: d.os, os: d.s, sp: d.osp, osp: d.sp, a: d.b, b
 // ein Spiel (Index mi) am Spieltag d; fr = eingefrorener Spieltag (Aufstellung + Ergebnisse unseres Teams)
 function coopMatch(S, d, mi, fr) {
   const [a, b] = S.days[d][mi], r = mkRng(S.seed ^ hashStr(d + '-' + mi)), us = a === 0 ? 'a' : b === 0 ? 'b' : null;
-  const la = coopLineup(S, a, d), lb = coopLineup(S, b, d), duels = [], f = lvlF(fr ? fr.lvl : S.lvl), adj = laneAdj(S, a);
+  const la = coopLineup(S, a, d), lb = coopLineup(S, b, d), duels = [], f = lvlF(fr ? fr.lvl : S.lvl), adj = laneAdj(S, a, fr);
   for (let k = 0; k < COOP_POS; k++) {
     const pa = la ? la[k] : null, pb = lb ? lb[k] : null;
     const sim = simDuel((pa ? pa.avg : COOP_ERSATZ) * f + adj, (pb ? pb.avg : COOP_ERSATZ) * f + adj, r);   // immer würfeln → Zufallsfolge bleibt gleich
@@ -3799,7 +3801,7 @@ async function coopLoad() {
   COOP.mem = snapList(m).sort((x, y) => (x.t || 0) - (y.t || 0) || (x.id < y.id ? -1 : 1));
   if (!COOP.mem.some(x => x.id === net.uid)) { COOP.err = 'Du bist nicht mehr in diesem Team.'; store.set('coop', ''); COOP.tid = ''; COOP.team = null; return; }
   const no = COOP.team.sno | 0 || 1;
-  COOP.S = coopSeason(COOP.tid, no); COOP.S.lvl = COOP.team.lvl | 0;
+  COOP.S = coopSeason(COOP.tid, no); COOP.S.lvl = COOP.team.lvl | 0; COOP.S.home = SL_LANES[COOP.team.home] ? COOP.team.home : '';
   COOP.frozen = {}; snapList(fz).forEach(f => { if ((f.se | 0) === no && f.day >= 0 && f.day < COOP_DAYS) COOP.frozen[f.day] = f; });
   let d = 0; while (d < COOP_DAYS && COOP.frozen[d]) d++;
   COOP.day = d;
@@ -3819,9 +3821,9 @@ async function coopFreeze() {
   line.forEach(u => { const x = COOP.res.find(y => y.uid === u); names[u] = coopName(u, x?.nm);
     if (x) res[u] = { s: x.s, os: x.os, sp: x.sp ?? null, osp: x.osp ?? null, a: x.a || [x.s], b: x.b || [x.os], quit: x.quit ? 1 : 0 }; });
   const pad = Array.from({ length: COOP_POS }, (_, k) => line[k] || '');
-  await withTimeout(cdoc(`d/${no}-${d}`).set({ se: no, day: d, line: pad, res, names, lvl: COOP.S.lvl | 0, t: Date.now(), by: net.uid }), 10000);
+  await withTimeout(cdoc(`d/${no}-${d}`).set({ se: no, day: d, line: pad, res, names, lvl: COOP.S.lvl | 0, home: COOP.S.home || '', t: Date.now(), by: net.uid }), 10000);
   try {   // Mitteilung an das Team: Ergebnis + nächster Spieltag offen
-    const S = COOP.S, mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), m = coopMatch(S, d, mi, { line: pad, res, names, lvl: S.lvl | 0 });
+    const S = COOP.S, mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), m = coopMatch(S, d, mi, { line: pad, res, names, lvl: S.lvl | 0, home: S.home || '' });
     const usA = m.a === 0, our = usA ? m.mpA : m.mpB, their = usA ? m.mpB : m.mpA, opp = S.teams[usA ? m.b : m.a].name;
     window.__push?.team(COOP.tid, { kind: 'day', title: `Spieltag ${d + 1}: ${spTxt(our)} : ${spTxt(their)} gegen ${opp}`,
       body: (our > their ? 'Sieg! 🎉 ' : our < their ? 'Niederlage. ' : 'Unentschieden. ') + (d + 1 < COOP_DAYS ? `Spieltag ${d + 2} ist offen – dein Duell wartet.` : 'Die Saison ist zu Ende – schau dir die Tabelle an.') });
@@ -3880,8 +3882,8 @@ function coopDraw() {
   // aktueller Spieltag
   const mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), [ha, hb] = S.days[d][mi], home = ha === 0, opp = S.teams[home ? hb : ha];
   h += `<div class="secT"><span>Spieltag ${d + 1} / ${COOP_DAYS}</span><small>${home ? 'Heimspiel' : 'Auswärts'} gegen ${esc(opp.name)}</small></div>`;
-  const vl = home ? null : SL_LANES[opp.name];
-  h += `<div class="tag cpLane">${vl ? `Bahn: <b>${esc(vl.bahn)}</b> · Bahnindex ${vl.idx > 0 ? '+' : ''}${vl.idx} (${laneWord(vl.idx)}) · Kegelstand ${slipLabel(laneSl(vl))}` : 'Bahn: eure Heimbahn (deine eigene Bahn und dein Kegelstand)'}</div><div class="rank">`;
+  const vl = home ? (S.home ? SL_LANES[S.home] : null) : SL_LANES[opp.name];
+  h += `<div class="tag cpLane">${vl ? `${home ? 'Heimbahn' : 'Bahn'}: <b>${esc(vl.bahn)}</b> · Bahnindex ${vl.idx > 0 ? '+' : ''}${vl.idx} (${laneWord(vl.idx)}) · Kegelstand ${slipLabel(laneSl(vl))}` : 'Bahn: eure Heimbahn (deine eigene Bahn und dein Kegelstand)'}</div><div class="rank">`;
   const oppL = coopLineup(S, home ? hb : ha, d);
   for (let k = 0; k < COOP_POS; k++) {
     const u = line[k], r = u && COOP.res.find(x => x.uid === u), o = oppL[k];
@@ -3907,6 +3909,9 @@ function coopDraw() {
     h += `<div class="tr ${cls}"><span>${i + 1}</span><span>${esc(x.i === 0 ? T.name : S.teams[x.i].name)}</span><span>${spTxt(x.mp)}:${spTxt(x.mpo)}</span><span>${x.h}</span><span>${x.pts}</span></div>`; });
   h += '</div>';
   // Team
+  const hl = S.home && SL_LANES[S.home];
+  h += `<div class="secT"><span>Heimbahn</span><small>${cap ? 'als Kapitän wählbar' : 'wählt der Kapitän'}</small></div><div class="tag" style="margin-top:0">${hl ? `<b>${esc(hl.bahn)}</b> · Bahnindex ${hl.idx > 0 ? '+' : ''}${hl.idx} (${laneWord(hl.idx)}) · Kegelstand ${slipLabel(laneSl(hl))}` : 'Eigene Bahn – jeder spielt daheim auf seiner eigenen Bahn mit seinem Kegelstand'}</div>`;
+  if (cap) h += `<div id="cpHome"><button data-home="" class="${!S.home ? 'on' : ''}">Eigene Bahn</button>${Object.entries(SL_LANES).map(([c, l]) => `<button data-home="${esc(c)}" class="${S.home === c ? 'on' : ''}"><b>${esc(l.bahn)}</b><small>${esc(c)} · ${l.idx > 0 ? '+' : ''}${l.idx}</small></button>`).join('')}</div>`;
   h += `<div class="secT"><span>Team (${COOP.mem.length}/${COOP_POS})</span><small>Code <b>${COOP.tid}</b> an Mitspieler schicken</small></div><div class="tag" style="margin-top:0">${COOP.mem.map(m => esc(m.nm || 'Spieler') + (m.id === coopCap() ? ' (Kapitän)' : '')).join(' · ')}</div>`;
   if (Array.isArray(T.hist) && T.hist.length) h += `<div class="tag" style="margin-top:0;font-size:13px">${T.hist.slice(-3).reverse().map(x => `Saison ${x.no}: Platz ${x.place}${x.place === 1 ? ' 🏆' : ''}`).join(' · ')}</div>`;
   const chat = COOP.chat || [];
@@ -3922,6 +3927,9 @@ function coopBind() {
   $('cpBody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => coopCreate(+b.dataset.f));
   on('cpJoin', () => coopJoin(($('cpCode').value || '').trim().toUpperCase()));
   on('cpPlay', coopPlay);
+  $('cpBody').querySelectorAll('[data-home]').forEach(b => b.onclick = async () => {   // Heimbahn wählen (gilt ab dem laufenden Spieltag)
+    try { const t = await withTimeout(cdoc().get(), 10000); await withTimeout(cdoc().set({ ...t.data(), home: b.dataset.home }), 10000); } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
+    if (!lanesLoaded) await lanesLoad(); coopRefresh(); });
   on('cpRemind', async () => {   // Kapitän erinnert, wer noch nicht gespielt hat
     const S = COOP.S, d = COOP.day, line = coopLine(), only = line.filter(u => !COOP.res.some(x => x.uid === u));
     const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), opp = S.teams[a === 0 ? b : a].name;
@@ -3973,10 +3981,10 @@ async function coopPlay() {
   const S = COOP.S, d = COOP.day, k = coopLine().indexOf(net.uid);
   if (!S || d >= COOP_DAYS || k < 0 || COOP.res.some(x => x.uid === net.uid)) return coopDraw();
   const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), home = a === 0, ot = home ? b : a, o = coopLineup(S, ot, d)[k];
-  const venue = home ? 0 : ot, li = venue ? SL_LANES[S.teams[ot].name] : null;
+  const venue = home ? 0 : ot, lc = home ? S.home : S.teams[ot].name, li = lc ? SL_LANES[lc] : null;
   const avg = Math.round(o.avg * lvlF(S.lvl) + laneAdj(S, venue) + (home ? -COOP_HOME : COOP_HOME));   // Gast spielt etwas schwächer
   COOPG = { tid: COOP.tid, no: S.no, d, k, home, opp: { name: o.name, avg, skill: skillFor(avg) }, team: S.teams[ot].name, done: false,
-    lane: li ? { hall: laneHall(S.teams[ot].name), sl: laneSl(li), name: li.bahn } : null };
+    lane: li ? { hall: laneHall(lc), sl: laneSl(li), name: li.bahn } : null };
   clearInterval(COOP.iv); $('coop').classList.add('hidden');
   startGame('coop4');
 }
