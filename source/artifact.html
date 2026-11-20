@@ -688,17 +688,18 @@ const bohle = new THREE.Mesh(new THREE.PlaneGeometry(BOHLE, 1.2), new THREE.Mesh
 bohle.rotation.x = -Math.PI / 2; bohle.position.set(0, .003, .4); bohle.receiveShadow = true; scene.add(bohle);
 // Anlauf: ab der Foul-Linie nach hinten aus Linoleum, so breit wie die Bahn (eigene Farbe im Bahn-Editor); Teppich links und rechts bleibt
 const anlaufMat = new THREE.MeshStandardMaterial({ color: 0x4a4f55, roughness: .55, metalness: 0, envMapIntensity: .2 });
-const anlaufLane = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), anlaufMat);
+const anlaufLane = new THREE.Mesh(new THREE.PlaneGeometry(WK + .06, 1), anlaufMat);   // über die ganze Bahnbreite (keine Rinnen beim Anlauf)
 anlaufLane.rotation.x = -Math.PI / 2; anlaufLane.position.set(0, .0015, .5); anlaufLane.receiveShadow = true; scene.add(anlaufLane);
 const dark = new THREE.MeshStandardMaterial({ color: 0x1a1f26, roughness: .7 });
 const gold = new THREE.MeshStandardMaterial({ color: 0xd9b46c, metalness: .95, roughness: .16, side: THREE.DoubleSide });
 // Fehlwurfrinnen als goldene Metallrinnen, außen mit Begrenzungsleiste; entlang der Bahn keine hohen Wände
 for (const s of [-1, 1]) {
-  const gut = new THREE.Mesh(new THREE.CylinderGeometry(GUT / 2, GUT / 2, runLen, 24, 1, true, Math.PI / 2, Math.PI), gold);
+  const gutLen = -KS;   // Fehlwurfrinnen enden an der Foul-Linie – beim Anlauf gibt es keine
+  const gut = new THREE.Mesh(new THREE.CylinderGeometry(GUT / 2, GUT / 2, gutLen, 24, 1, true, Math.PI / 2, Math.PI), gold);
   gut.rotation.x = -Math.PI / 2; gut.scale.set(1, 1, .45);   // flache Mulde
-  gut.position.set(s * (W / 2 + GUT / 2), 0, 1 - runLen / 2); gut.receiveShadow = true; scene.add(gut);
-  const rim = new THREE.Mesh(new THREE.BoxGeometry(.03, .05, runLen), gold);
-  rim.position.set(s * (WK / 2 + .015), .025, 1 - runLen / 2); scene.add(rim);
+  gut.position.set(s * (W / 2 + GUT / 2), 0, -gutLen / 2); gut.receiveShadow = true; scene.add(gut);
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(.03, .05, gutLen), gold);
+  rim.position.set(s * (WK / 2 + .015), .025, -gutLen / 2); scene.add(rim);
   const wl = (s < 0 ? standLen + PIT : standLen) + .1;   // Schlagwände nur im Kegelraum; rechts endet sie an der Grube
   const wall = new THREE.Mesh(new THREE.BoxGeometry(.06, .95, wl), dark);
   wall.position.set(s * (WK / 2 + .03), .38, KS + .1 - wl / 2); scene.add(wall);
