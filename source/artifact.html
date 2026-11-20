@@ -217,6 +217,9 @@ h2{font-family:"Barlow Condensed";font-weight:800;font-size:30px;letter-spacing:
 .rank .up span:first-child{color:#5fd38a}.rank .dn span:first-child{color:#ff6b5e}
 .cpIn{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:16px}
 .cpRow{margin-top:8px}
+.cpClub{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%}.cpClub button{text-align:left;padding:9px 11px;border-radius:12px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:14px}.cpClub button b{display:block;font-weight:600}.cpClub button small{color:#a7b3c2;font-size:11px}
+.cpAu{display:grid;grid-template-columns:22px minmax(0,1fr) minmax(0,.9fr);gap:6px;align-items:center;margin:4px 0}.cpAu select{width:100%;padding:8px;border-radius:10px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:13px}.cpAu small{font-size:12px;color:#a7b3c2}.cpAu .dup{border-color:var(--red)}
+.cpPl{display:flex;gap:8px;align-items:center;margin:4px 0;font-size:14px}.cpPl select{flex:1;padding:8px;border-radius:10px;border:1px solid var(--line);background:#121821;color:inherit;font:inherit;font-size:13px}
 .cpM{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:center;padding:8px 12px;font-size:14px}
 .cpM span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cpM span:last-child{text-align:right}.cpM b{font-variant-numeric:tabular-nums}
 .cpM.us{background:#121821;border:1px solid var(--line);border-radius:12px;font-size:16px;margin-bottom:6px}.cpM.us b{color:var(--acc);font-size:20px}
@@ -3636,9 +3639,10 @@ function skillFor(avg) {
 }
 const coopLane = (avg, r) => Math.round(clamp(avg / 4 + rGauss(r) * COOP_LSD, 90, 200));
 // Saison: Spielplan nur aus Code + Saison-Nummer (kein Speichern nötig)
-function coopSeason(tid, no) {
-  const r = mkRng(hashStr(tid + '/' + no + '/SL'));
-  const teams = [{ us: true }, ...SL_TEAMS.map(c => ({ name: c.name, roster: c.pl.map(([name, avg, n]) => ({ name, avg, n })) }))];
+function coopSeason(tid, no, club) {   // club: Verein, den das Team übernimmt (sonst alter Modus: eigenes Team + 9 Vereine)
+  const r = mkRng(hashStr(tid + '/' + no + '/SL')), C = SL_CLUBS.find(c => c.name === club);
+  const ros = c => c.pl.map(([name, avg, n]) => ({ name, avg, n }));
+  const teams = [C ? { us: true, name: C.name, roster: ros(C) } : { us: true }, ...(C ? SL_CLUBS.filter(c => c !== C) : SL_TEAMS).map(c => ({ name: c.name, roster: ros(c) }))];
   const days = [], sh = Array.from({ length: 9 }, (_, i) => i + 1);
   for (let i = sh.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [sh[i], sh[j]] = [sh[j], sh[i]]; }
   let arr = [0, ...sh];
@@ -3647,7 +3651,7 @@ function coopSeason(tid, no) {
     days.push(m); arr = [arr[0], arr[9], ...arr.slice(1, 9)];
   }
   for (let d = 0; d < 9; d++) days.push(days[d].map(([a, b]) => [b, a]));
-  return { tid, no, fmt: 4, teams, days, seed: hashStr(tid + '#' + no) };
+  return { tid, no, fmt: 4, teams, days, seed: hashStr(tid + '#' + no), club: C ? C.name : '' };
 }
 // Aufstellung eines Vereins am Spieltag: 6 aus dem Kader, Stammspieler (viele Einsätze) öfter
 function coopLineup(S, t, d) {
@@ -3672,6 +3676,7 @@ const flipDuel = d => ({ ...d, s: d.os, os: d.s, sp: d.osp, osp: d.sp, a: d.b, b
 function coopMatch(S, d, mi, fr) {
   const [a, b] = S.days[d][mi], r = mkRng(S.seed ^ hashStr(d + '-' + mi)), us = a === 0 ? 'a' : b === 0 ? 'b' : null;
   const la = coopLineup(S, a, d), lb = coopLineup(S, b, d), duels = [], f = lvlF(fr ? fr.lvl : S.lvl), adj = laneAdj(S, a, fr);
+  if (us && fr?.us) return coopMatchLU(S, d, a, b, us, fr, f, adj, r);
   for (let k = 0; k < COOP_POS; k++) {
     const pa = la ? la[k] : null, pb = lb ? lb[k] : null;
     const sim = simDuel((pa ? pa.avg : COOP_ERSATZ) * f + adj, (pb ? pb.avg : COOP_ERSATZ) * f + adj, r);   // immer würfeln → Zufallsfolge bleibt gleich
@@ -3680,6 +3685,25 @@ function coopMatch(S, d, mi, fr) {
     const du = our ? (us === 'a' ? our : flipDuel(our)) : sim;
     const usName = res ? (fr.names?.[uid] || 'Spieler') : 'Ersatz (CPU)';
     du.na = pa ? pa.name : usName; du.nb = pb ? pb.name : usName; du.real = !!our;
+    duels.push(du);
+  }
+  let mpA = duels.reduce((p, x) => p + duelMP(x), 0), mpB = COOP_POS - mpA;
+  const ha = duels.reduce((p, x) => p + x.s, 0), hb = duels.reduce((p, x) => p + x.os, 0);
+  if (ha > hb) mpA += 2; else if (ha < hb) mpB += 2; else { mpA++; mpB++; }
+  return { a, b, duels, ha, hb, mpA, mpB };
+}
+// unser Spiel mit Aufstellung: fr.us = unsere Positionen (uid oder 'c:Name' für Vereinskollegen als CPU), fr.op = Gegner je Position,
+// fr.pa/fr.pn = Schnitt/Name je Position (beim Abschluss festgehalten). Gegnerstärke (lvl) wirkt nur auf den Gegner.
+function coopMatchLU(S, d, a, b, us, fr, f, adj, r) {
+  const ot = us === 'a' ? b : a, OR = S.teams[ot].roster || [], duels = [];
+  for (let k = 0; k < COOP_POS; k++) {
+    const o = OR.find(p => p.name === fr.op?.[k]) || { name: fr.op?.[k] || 'Ersatz (CPU)', avg: COOP_ERSATZ };
+    const ua = (fr.pa?.[k] || COOP_ERSATZ) + adj, oa = o.avg * f + adj;
+    const sim = us === 'a' ? simDuel(ua, oa, r) : simDuel(oa, ua, r);
+    const slot = fr.us[k] || '', uid = slot && !slot.startsWith('c:') ? slot : '', res = uid && fr.res?.[uid];
+    const our = res ? { s: res.s, os: res.os, sp: res.sp, osp: res.osp, a: res.a || [res.s], b: res.b || [res.os], quit: res.quit } : null;
+    const du = our ? (us === 'a' ? our : flipDuel(our)) : sim, un = fr.pn?.[k] || 'Ersatz (CPU)';
+    du.na = us === 'a' ? un : o.name; du.nb = us === 'a' ? o.name : un; du.real = !!our;
     duels.push(du);
   }
   let mpA = duels.reduce((p, x) => p + duelMP(x), 0), mpB = COOP_POS - mpA;
@@ -3704,6 +3728,31 @@ const ccol = c => net.db.collection('coop/' + COOP.tid + '/' + c);
 const coopName = (uid, fb) => COOP.mem.find(m => m.id === uid)?.nm || fb || 'Spieler';
 const coopCap = () => COOP.mem.some(m => m.id === COOP.team?.cap) ? COOP.team.cap : COOP.mem[0]?.id;
 const coopLine = () => COOP.mem.slice(0, COOP_POS).map(m => m.id);
+// Verein des Teams: jeder Mitspieler ersetzt einen Spieler des Kaders (m.pl), die übrigen spielen als CPU mit ihrem echten Schnitt
+const coopClub = () => SL_CLUBS.find(c => c.name === COOP.team?.club) || null;
+function coopRoster() {
+  const c = coopClub(); if (!c) return [];
+  return c.pl.map(([name, avg, n]) => { const m = COOP.mem.find(x => x.pl === name); return { name, avg, n, uid: m ? m.id : '' }; });
+}
+const coopSlotKey = p => p.uid || 'c:' + p.name;
+function coopSlot(slot, R) {   // Position → Spieler (Mitspieler oder Vereinskollege als CPU)
+  if (!slot) return null;
+  if (slot.startsWith('c:')) { const p = R.find(x => x.name === slot.slice(2)); return p ? { ...p, uid: '' } : null; }
+  return R.find(x => x.uid === slot) || { name: coopName(slot), avg: COOP_ERSATZ, uid: slot, gone: true };
+}
+const coopSlotName = (slot, R) => { const p = coopSlot(slot, R); return !p ? '–' : p.uid ? coopName(p.uid) : p.name; };
+function coopDefaultUs(R) {   // Vorschlag: alle Mitspieler, dann die stärksten Vereinskollegen
+  return [...R.filter(p => p.uid), ...R.filter(p => !p.uid).sort((a, b) => b.avg - a.avg)].slice(0, COOP_POS).map(coopSlotKey);
+}
+const coopOurMatch = (S, d) => { const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0); return { home: a === 0, ot: a === 0 ? b : a }; };
+// Gegner-Aufstellung: ist der Gegner Heimteam, steht seine Reihenfolge fest; sind wir Heimteam, wählt der Gast (CPU) die Paarungen
+function coopOppLine(S, d) {
+  const { home, ot } = coopOurMatch(S, d), L = coopLineup(S, ot, d).slice();
+  if (home) { const r = mkRng(S.seed ^ hashStr('G' + d)); for (let i = L.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [L[i], L[j]] = [L[j], L[i]]; } }
+  return L.map(p => p.name);
+}
+const coopLU = () => COOP.lu || { us: coopDefaultUs(coopRoster()), op: coopOppLine(COOP.S, COOP.day), auto: true };
+const coopHumans = L => L.us.filter(x => x && !x.startsWith('c:'));
 
 /* ============ Admin: Vereinsbahnen selbst bearbeiten (nur der Besitzer des Spiels) ============
    Gespeichert in der gemeinsamen Datenbank: lanes/<schlüssel> = { club, bahn, look, sl, t } (Farben wie im Bahn-Editor,
@@ -3826,7 +3875,7 @@ async function coopLoad() {
   COOP.mem = snapList(m).sort((x, y) => (x.t || 0) - (y.t || 0) || (x.id < y.id ? -1 : 1));
   if (!COOP.mem.some(x => x.id === net.uid)) { COOP.err = 'Du bist nicht mehr in diesem Team.'; store.set('coop', ''); COOP.tid = ''; COOP.team = null; return; }
   const no = COOP.team.sno | 0 || 1;
-  COOP.S = coopSeason(COOP.tid, no); COOP.S.lvl = COOP.team.lvl | 0; COOP.S.home = SL_LANES[COOP.team.home] ? COOP.team.home : '';
+  COOP.S = coopSeason(COOP.tid, no, COOP.team.club); COOP.S.lvl = COOP.team.lvl | 0; COOP.S.home = SL_LANES[COOP.team.home] ? COOP.team.home : '';
   COOP.frozen = {}; snapList(fz).forEach(f => { if ((f.se | 0) === no && f.day >= 0 && f.day < COOP_DAYS) COOP.frozen[f.day] = f; });
   let d = 0; while (d < COOP_DAYS && COOP.frozen[d]) d++;
   COOP.day = d;
@@ -3835,6 +3884,13 @@ async function coopLoad() {
   catch (e) { rs = snapList(await withTimeout(ccol('r').get(), 10000)).filter(x => x.k === `${no}-${d}`); }
   COOP.res = rs.filter(x => typeof x.s === 'number');
   try { COOP.chat = snapList(await withTimeout(ccol('c').get(), 10000)).filter(x => typeof x.x === 'string').sort((a, b) => (a.t || 0) - (b.t || 0)).slice(-40); } catch (e) { }
+  if (COOP.S.club) {   // Aufstellung des Spieltags (macht der Kapitän vor dem Spiel)
+    let lu = null; try { const a = await withTimeout(cdoc(`a/${no}-${d}`).get(), 10000); if (a.exists) lu = a.data(); } catch (e) { }
+    COOP.lu = lu && Array.isArray(lu.us) && Array.isArray(lu.op) ? lu : null;
+    const hu = COOP.lu ? coopHumans(COOP.lu) : [];
+    if (hu.length && hu.every(u => COOP.res.some(x => x.uid === u))) await coopFreeze();   // alle aufgestellten Mitspieler haben gespielt
+    return;
+  }
   const line = coopLine();
   if (line.length && line.every(u => COOP.res.some(x => x.uid === u))) await coopFreeze();   // alle haben gespielt
 }
@@ -3842,6 +3898,7 @@ async function coopFreeze() {
   const no = COOP.S.no, d = COOP.day, line = coopLine();
   const ex = await withTimeout(cdoc(`d/${no}-${d}`).get(), 10000);
   if (ex.exists) return coopLoad();
+  if (COOP.S.club) return coopFreezeLU(no, d);
   const res = {}, names = {};
   line.forEach(u => { const x = COOP.res.find(y => y.uid === u); names[u] = coopName(u, x?.nm);
     if (x) res[u] = { s: x.s, os: x.os, sp: x.sp ?? null, osp: x.osp ?? null, a: x.a || [x.s], b: x.b || [x.os], quit: x.quit ? 1 : 0 }; });
@@ -3852,6 +3909,22 @@ async function coopFreeze() {
     const usA = m.a === 0, our = usA ? m.mpA : m.mpB, their = usA ? m.mpB : m.mpA, opp = S.teams[usA ? m.b : m.a].name;
     window.__push?.team(COOP.tid, { kind: 'day', title: `Spieltag ${d + 1}: ${spTxt(our)} : ${spTxt(their)} gegen ${opp}`,
       body: (our > their ? 'Sieg! 🎉 ' : our < their ? 'Niederlage. ' : 'Unentschieden. ') + (d + 1 < COOP_DAYS ? `Spieltag ${d + 2} ist offen – dein Duell wartet.` : 'Die Saison ist zu Ende – schau dir die Tabelle an.') });
+  } catch (e) { }
+  return coopLoad();
+}
+async function coopFreezeLU(no, d) {   // Spieltag abschließen: Aufstellung (oder Vorschlag) + echte Ergebnisse festhalten
+  const S = COOP.S, L = coopLU(), R = coopRoster(), res = {}, names = {}, pa = [], pn = [];
+  L.us.forEach((slot, k) => { const p = coopSlot(slot, R); pa[k] = p ? p.avg : COOP_ERSATZ;
+    if (p?.uid) { const x = COOP.res.find(y => y.uid === slot); names[slot] = coopName(slot, x?.nm); pn[k] = names[slot];
+      if (x) res[slot] = { s: x.s, os: x.os, sp: x.sp ?? null, osp: x.osp ?? null, a: x.a || [x.s], b: x.b || [x.os], quit: x.quit ? 1 : 0 }; }
+    else pn[k] = p ? p.name : 'Ersatz (CPU)'; });
+  const fr = { se: no, day: d, us: L.us, op: L.op, pa, pn, line: L.us, res, names, lvl: S.lvl | 0, home: S.home || '', t: Date.now(), by: net.uid };
+  await withTimeout(cdoc(`d/${no}-${d}`).set(fr), 10000);
+  try {
+    const mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), m = coopMatch(S, d, mi, fr);
+    const usA = m.a === 0, our = usA ? m.mpA : m.mpB, their = usA ? m.mpB : m.mpA, opp = S.teams[usA ? m.b : m.a].name;
+    window.__push?.team(COOP.tid, { kind: 'day', title: `Spieltag ${d + 1}: ${spTxt(our)} : ${spTxt(their)} gegen ${opp}`,
+      body: (our > their ? 'Sieg! 🎉 ' : our < their ? 'Niederlage. ' : 'Unentschieden. ') + (d + 1 < COOP_DAYS ? `Spieltag ${d + 2}: der Kapitän macht die Aufstellung.` : 'Die Saison ist zu Ende – schau dir die Tabelle an.') });
   } catch (e) { }
   return coopLoad();
 }
@@ -3878,11 +3951,11 @@ function coopDraw() {
   if ($('coop').classList.contains('hidden')) return;
   const err = COOP.err ? `<div class="tag" style="color:var(--red)">${esc(COOP.err)}</div>` : '';
   if (!COOP.team) {
-    $('cpTitle').textContent = 'Coop-Liga'; $('cpTag').textContent = 'Spielt als Mannschaft (bis 6 Spieler) in der Superliga gegen die echten Vereine – Hin- und Rückrunde, 120 Wurf.';
+    $('cpTitle').textContent = 'Coop-Liga'; $('cpTag').textContent = 'Übernehmt einen Superliga-Verein (bis 6 Spieler) und spielt gegen die echten Vereine – Hin- und Rückrunde, 120 Wurf.';
     return coopRender(err + `
-      <div class="secT"><span>Team gründen</span><small>du wirst Kapitän</small></div>
-      <input id="cpName" class="cpIn" maxlength="24" placeholder="Teamname, z. B. KSC Wien">
-      <div class="btns cpRow"><button class="btn pri" data-f="4">Team gründen <small>120 Wurf · Superliga</small></button></div>
+      <div class="secT"><span>Team gründen</span><small>Verein wählen · du wirst Kapitän</small></div>
+      <div class="tag" style="margin-top:0">Ihr spielt als dieser Verein: jeder Mitspieler ersetzt einen Spieler aus dem Kader, die übrigen spielen als CPU mit ihrem echten Schnitt.</div>
+      ${coopClubGrid()}
       <div class="secT"><span>Team beitreten</span><small>Code vom Kapitän</small></div>
       <input id="cpCode" class="cpIn" maxlength="6" placeholder="Code, z. B. K7M2QX" style="text-transform:uppercase">
       <div class="btns" style="margin-top:8px"><button class="btn pri" id="cpJoin">Beitreten <small></small></button></div>` + coopAdminBtn()), coopBind();
@@ -3891,6 +3964,10 @@ function coopDraw() {
   $('cpTitle').textContent = T.name || 'Coop-Team';
   $('cpTag').textContent = `Superliga · Saison ${S.no} · 120 Wurf · Code ${COOP.tid}`;
   let h = err + (COOP.note ? `<div class="tag hlT">${esc(COOP.note)}</div>` : '');
+  if (!S.club) h += cap ? `<div class="secT"><span>Verein wählen</span><small>neu – startet eine neue Saison</small></div><div class="tag" style="margin-top:0">Übernehmt einen echten Verein: jeder Mitspieler ersetzt einen Spieler aus dem Kader, vor jedem Spiel macht der Kapitän die Aufstellung.</div>${coopClubGrid()}`
+    : `<div class="tag hlT">Neu: Der Kapitän kann jetzt einen echten Verein für euer Team wählen.</div>`;
+  const R = S.club ? coopRoster() : [], myPl = S.club && COOP.mem.find(m => m.id === me)?.pl;
+  if (S.club && !myPl) h += `<div class="tag hlT">Wähle unten unter „Wer ersetzt wen“, welchen Spieler von ${esc(S.club)} du ersetzt – erst dann kannst du aufgestellt werden.</div>`;
   const hadNote = /^Saison/.test(COOP.note); COOP.note = '';
   const lh = Array.isArray(T.hist) && T.hist[T.hist.length - 1];
   if (d === 0 && !hadNote && lh && lh.no === S.no - 1) h += `<div class="tag hlT">Saison ${lh.no} beendet: Platz ${lh.place}${lh.place === 1 ? ' – Österreichischer Meister! 🏆' : ''}</div>`;
@@ -3908,7 +3985,10 @@ function coopDraw() {
   const mi = S.days[d].findIndex(([a, b]) => a === 0 || b === 0), [ha, hb] = S.days[d][mi], home = ha === 0, opp = S.teams[home ? hb : ha];
   h += `<div class="secT"><span>Spieltag ${d + 1} / ${COOP_DAYS}</span><small>${home ? 'Heimspiel' : 'Auswärts'} gegen ${esc(opp.name)}</small></div>`;
   const vl = home ? (S.home ? SL_LANES[S.home] : null) : SL_LANES[opp.name];
-  h += `<div class="tag cpLane">${vl ? `${home ? 'Heimbahn' : 'Bahn'}: <b>${esc(vl.bahn)}</b> · Bahnindex ${vl.idx > 0 ? '+' : ''}${vl.idx} (${laneWord(vl.idx)}) · Kegelstand ${slipLabel(laneSl(vl))}` : 'Bahn: eure Heimbahn (deine eigene Bahn und dein Kegelstand)'}</div><div class="rank">`;
+  h += `<div class="tag cpLane">${vl ? `${home ? 'Heimbahn' : 'Bahn'}: <b>${esc(vl.bahn)}</b> · Bahnindex ${vl.idx > 0 ? '+' : ''}${vl.idx} (${laneWord(vl.idx)}) · Kegelstand ${slipLabel(laneSl(vl))}` : 'Bahn: eure Heimbahn (deine eigene Bahn und dein Kegelstand)'}</div>`;
+  let wait;
+  if (S.club) { const x = coopDayLU(S, d, home, home ? hb : ha, cap, me, R); h += x.html; wait = x.wait; } else {
+  h += '<div class="rank">';
   const oppL = coopLineup(S, home ? hb : ha, d);
   for (let k = 0; k < COOP_POS; k++) {
     const u = line[k], r = u && COOP.res.find(x => x.uid === u), o = oppL[k];
@@ -3916,28 +3996,37 @@ function coopDraw() {
     h += `<div class="tr cpL${u === me ? ' me' : ''}"><span>${k + 1}</span><span>${u ? esc(coopName(u)) : '–'}<small>vs ${esc(o.name)} · Ø ${o.avg}</small></span><span class="${r ? 'ok' : ''}">${st}</span></div>`;
   }
   h += '</div>';
-  const myK = line.indexOf(me), mine = COOP.res.find(x => x.uid === me), wait = line.filter(u => !COOP.res.some(x => x.uid === u)).map(u => coopName(u));
+  const myK = line.indexOf(me), mine = COOP.res.find(x => x.uid === me); wait = line.filter(u => !COOP.res.some(x => x.uid === u)).map(u => coopName(u));
   h += '<div class="btns" style="margin-top:10px">';
   if (myK >= 0 && !mine) h += `<button class="btn pri" id="cpPlay">Dein Duell spielen <small>Pos. ${myK + 1} gegen ${esc(oppL[myK].name)} · Ø ${oppL[myK].avg}, heute ≈ ${Math.round(oppL[myK].avg * lvlF(S.lvl) + laneAdj(S, home ? 0 : (ha === 0 ? hb : ha)) + (home ? -COOP_HOME : COOP_HOME))}</small></button>`;
   else if (myK < 0) h += `<div class="tag">Das Team ist voll – du bist Reserve.</div>`;
   else h += `<div class="tag">Dein Duell ist gespielt. Warte auf: ${esc(wait.join(', ') || '–')}</div>`;
+  }
   h += `<div class="tag" style="margin:6px 0 0;font-size:13px">Gegnerstärke: <b>${COOP_LVLS[S.lvl][1]}</b>${S.lvl ? ' (Schnitte der Gegner × ' + lvlF(S.lvl) + ')' : ' (echte Schnitte)'}${cap ? ' – als Kapitän hier einstellbar' : ''}</div>`;
   if (cap) h += `<div class="cpLv">${COOP_LVLS.map(([, n], i) => `<button class="${i === S.lvl ? 'on' : ''}" data-lv="${i}">${n}</button>`).join('')}</div>`;
   if (cap && wait.length && window.__push) h += `<button class="btn" id="cpRemind">Erinnerung schicken <small>an ${wait.length === 1 ? esc(wait[0]) : wait.length + ' Spieler'}</small></button>`;
-  if (cap) h += `<button class="btn" id="cpClose">Spieltag abschließen <small>${wait.length ? 'fehlende Duelle werden simuliert' : ''}</small></button>`;
+  if (cap) h += `<button class="btn" id="cpClose">Spieltag abschließen <small>${S.club && !COOP.lu ? 'ohne Aufstellung: Vorschlag wird genommen, ' : ''}${wait.length || (S.club && !COOP.lu) ? 'fehlende Duelle werden simuliert' : ''}</small></button>`;
   h += '</div>';
   // Tabelle
   const tb = coopTable(S, COOP.frozen);
   h += `<div class="secT"><span>Tabelle</span><small>Platz 1 = Meister</small></div><div class="rank">`;
   h += '<div class="tr th"><span>#</span><span>MANNSCHAFT</span><span>MP</span><span>HOLZ</span><span>PKT</span></div>';
   tb.forEach((x, i) => { const cls = (x.i === 0 ? 'me ' : '') + (i === 0 ? 'up' : '');
-    h += `<div class="tr ${cls}"><span>${i + 1}</span><span>${esc(x.i === 0 ? T.name : S.teams[x.i].name)}</span><span>${spTxt(x.mp)}:${spTxt(x.mpo)}</span><span>${x.h}</span><span>${x.pts}</span></div>`; });
+    h += `<div class="tr ${cls}"><span>${i + 1}</span><span>${esc(x.i === 0 ? (S.club || T.name) : S.teams[x.i].name)}</span><span>${spTxt(x.mp)}:${spTxt(x.mpo)}</span><span>${x.h}</span><span>${x.pts}</span></div>`; });
   h += '</div>';
   // Team
   const hl = S.home && SL_LANES[S.home];
   h += `<div class="secT"><span>Heimbahn</span><small>${cap ? 'als Kapitän wählbar' : 'wählt der Kapitän'}</small></div><div class="tag" style="margin-top:0">${hl ? `<b>${esc(hl.bahn)}</b> · Bahnindex ${hl.idx > 0 ? '+' : ''}${hl.idx} (${laneWord(hl.idx)}) · Kegelstand ${slipLabel(laneSl(hl))}` : 'Eigene Bahn – jeder spielt daheim auf seiner eigenen Bahn mit seinem Kegelstand'}</div>`;
   if (cap) h += `<div id="cpHome"><button data-home="" class="${!S.home ? 'on' : ''}">Eigene Bahn</button>${Object.entries(SL_LANES).map(([c, l]) => `<button data-home="${esc(c)}" class="${S.home === c ? 'on' : ''}"><b>${esc(l.bahn)}</b><small>${esc(c)} · ${l.idx > 0 ? '+' : ''}${l.idx}</small></button>`).join('')}</div>`;
   h += `<div class="secT"><span>Team (${COOP.mem.length}/${COOP_POS})</span><small>Code <b>${COOP.tid}</b> an Mitspieler schicken</small></div><div class="tag" style="margin-top:0">${COOP.mem.map(m => esc(m.nm || 'Spieler') + (m.id === coopCap() ? ' (Kapitän)' : '')).join(' · ')}</div>`;
+  if (S.club) {   // jeder Mitspieler ersetzt einen Spieler aus dem Kader
+    h += `<div class="secT"><span>Wer ersetzt wen</span><small>Kader ${esc(S.club)}</small></div>`;
+    COOP.mem.forEach(m => {
+      if (m.id === me) h += `<div class="cpPl"><b>Du</b><select id="cpPl"><option value="">– Spieler wählen –</option>${R.filter(p => !p.uid || p.uid === me).map(p => `<option value="${esc(p.name)}"${p.name === m.pl ? ' selected' : ''}>${esc(p.name)} · Ø ${p.avg}</option>`).join('')}</select></div>`;
+      else h += `<div class="cpPl">${esc(m.nm || 'Spieler')} → ${m.pl ? esc(m.pl) : '<i>noch nicht gewählt</i>'}</div>`;
+    });
+    h += `<div class="tag" style="margin-top:4px;font-size:13px">CPU: ${R.filter(p => !p.uid).map(p => esc(p.name) + ' ' + p.avg).join(' · ')}</div>`;
+  }
   if (Array.isArray(T.hist) && T.hist.length) h += `<div class="tag" style="margin-top:0;font-size:13px">${T.hist.slice(-3).reverse().map(x => `Saison ${x.no}: Platz ${x.place}${x.place === 1 ? ' 🏆' : ''}`).join(' · ')}</div>`;
   const chat = COOP.chat || [];
   h += `<div class="secT"><span>Team-Chat</span><small>nur für dein Team</small></div><div class="cpChat" id="cpChat">${chat.length ? chat.map(m => `<div class="${m.u === net.uid ? 'me' : ''}"><b>${esc(m.nm || 'Spieler')}</b>${esc(m.x)}<small>${new Date(m.t).toLocaleString('de-AT', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</small></div>`).join('') : '<div class="tag">Noch keine Nachrichten. Schreib deinem Team!</div>'}</div>
@@ -3946,17 +4035,75 @@ function coopDraw() {
   h += `<div class="btns"><button class="btn" id="cpShare">Code kopieren <small>${COOP.tid}</small></button><button class="btn" id="cpLeave">Team verlassen <small></small></button></div>`;
   coopRender(h); coopBind();
 }
+const coopClubGrid = () => `<div class="cpClub">${SL_CLUBS.map(c => { const top = c.pl.map(p => p[1]).sort((a, b) => b - a).slice(0, 6), avg = Math.round(top.reduce((a, b) => a + b, 0) / top.length);
+  return `<button data-club="${esc(c.name)}"><b>${esc(c.name)}</b><small>Ø ${avg} · ${c.pl.length} Spieler · ${esc(SL_LANES[c.name]?.bahn || '')}</small></button>`; }).join('')}</div>`;
+// Spieltag mit Aufstellung: Heimteam legt die Positionen fest, der Gast wählt danach, wer gegen wen spielt
+function coopDayLU(S, d, home, ot, cap, me, R) {
+  const OR = S.teams[ot].roster, L = coopLU(), locked = !!COOP.lu, started = COOP.res.length > 0;
+  const key = `${COOP.tid}-${S.no}-${d}`; if (COOP.edKey !== key) { COOP.edKey = key; COOP.ed = null; COOP.editing = false; }
+  const edit = cap && !started && (!locked || COOP.editing), oppOf = k => OR.find(p => p.name === L.op[k]);
+  let h = '';
+  if (edit) {
+    const norm = x => { if (x?.startsWith('c:')) { const p = R.find(q => q.name === x.slice(2)); if (p?.uid) return p.uid; } return x; };   // Spieler inzwischen von einem Mitspieler übernommen
+    const ed = (COOP.ed || L.us).map(norm);
+    h += `<div class="tag" style="margin-top:0">${home ? '<b>Heimspiel:</b> ihr legt fest, wer auf welcher Position spielt. Danach wählt der Gast, wer gegen wen spielt.' : '<b>Auswärts:</b> der Gastgeber hat aufgestellt. Ihr wählt, wer gegen wen spielt.'}</div>`;
+    ed.forEach((slot, k) => { const o = oppOf(k), dup = !!slot && ed.indexOf(slot) !== k;
+      h += `<div class="cpAu"><b>${k + 1}</b><select data-au="${k}"${dup ? ' class="dup"' : ''}>${R.map(p => { const v = coopSlotKey(p);
+        return `<option value="${esc(v)}"${v === slot ? ' selected' : ''}>${esc(p.uid ? coopName(p.uid) + ' (für ' + p.name + ')' : p.name + ' (CPU)')} · Ø ${p.avg}</option>`; }).join('')}</select>
+        <small>${home ? 'Gast wählt danach' : o ? `gegen <b>${esc(o.name)}</b> · Ø ${o.avg}` : ''}</small></div>`; });
+    h += `<div class="btns" style="margin-top:8px"><button class="btn pri" id="cpAuOk">Aufstellung bestätigen <small>${home ? 'danach stellt der Gast auf' : 'Paarungen stehen fest'}</small></button></div>`;
+    return { html: h, wait: [] };
+  }
+  if (!locked) {
+    h += `<div class="tag" style="margin-top:0">Der Kapitän macht gerade die Aufstellung.${home ? '' : ' Der Gastgeber hat schon aufgestellt:'}</div>`;
+    if (!home) h += `<div class="rank">${L.op.map((n, k) => { const o = oppOf(k); return `<div class="tr cpL"><span>${k + 1}</span><span>${esc(n)}<small>${S.teams[ot].name}</small></span><span>Ø ${o ? o.avg : ''}</span></div>`; }).join('')}</div>`;
+    return { html: h, wait: [] };
+  }
+  h += '<div class="rank">';
+  L.us.forEach((slot, k) => { const p = coopSlot(slot, R), o = oppOf(k), r = p?.uid && COOP.res.find(x => x.uid === p.uid);
+    const st = !p ? '' : !p.uid ? 'CPU – wird simuliert' : r ? `gespielt ${r.s} : ${r.os}${r.quit ? ' (aufgegeben)' : ''}` : 'offen';
+    h += `<div class="tr cpL${p?.uid === me ? ' me' : ''}"><span>${k + 1}</span><span>${esc(coopSlotName(slot, R))}<small>${p?.uid && !p.gone ? 'für ' + esc(p.name) + ' · ' : ''}gegen ${o ? esc(o.name) + ' · Ø ' + o.avg : '–'}</small></span><span class="${r ? 'ok' : ''}">${st}</span></div>`; });
+  h += '</div>';
+  const myK = L.us.indexOf(me), mine = COOP.res.find(x => x.uid === me), wait = coopHumans(L).filter(u => !COOP.res.some(x => x.uid === u)).map(u => coopName(u));
+  h += '<div class="btns" style="margin-top:10px">';
+  if (myK >= 0 && !mine) { const o = oppOf(myK);
+    if (o) h += `<button class="btn pri" id="cpPlay">Dein Duell spielen <small>Pos. ${myK + 1} gegen ${esc(o.name)} · Ø ${o.avg}, heute ≈ ${Math.round(o.avg * lvlF(S.lvl) + laneAdj(S, home ? 0 : ot) + (home ? -COOP_HOME : COOP_HOME))}</small></button>`; }
+  else if (myK < 0) h += `<div class="tag">Du bist an diesem Spieltag nicht aufgestellt.</div>`;
+  else h += `<div class="tag">Dein Duell ist gespielt. Warte auf: ${esc(wait.join(', ') || '–')}</div>`;
+  if (cap && !started) h += `<button class="btn" id="cpAuEdit">Aufstellung ändern <small>bis das erste Duell gespielt ist</small></button>`;
+  h += '</div>';
+  return { html: h, wait };
+}
 const coopAdminBtn = () => isAdmin() ? `<div class="btns" style="margin-top:10px"><button class="btn" id="cpAdmin">Vereinsbahnen bearbeiten <small>Admin · Farben, Bilder, Kegelstand</small></button></div>` : '';
 function coopBind() {
   const on = (id, f) => { const e = $(id); if (e) e.onclick = f; };
-  $('cpBody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => coopCreate(+b.dataset.f));
+  $('cpBody').querySelectorAll('[data-club]').forEach(b => b.onclick = () => COOP.team ? coopSetClub(b.dataset.club) : coopCreate(b.dataset.club));
+  $('cpBody').querySelectorAll('[data-au]').forEach(sel => sel.onchange = () => { COOP.ed = [...$('cpBody').querySelectorAll('[data-au]')].map(x => x.value); coopDraw(); });
+  on('cpAuEdit', () => { COOP.editing = true; COOP.ed = null; coopDraw(); });
+  on('cpAuOk', async () => {
+    const ed = [...$('cpBody').querySelectorAll('[data-au]')].map(x => x.value), S = COOP.S, d = COOP.day;
+    if (ed.length !== COOP_POS || ed.some(x => !x) || new Set(ed).size !== COOP_POS) { COOP.err = 'Jeder Spieler darf nur einmal aufgestellt werden.'; return coopDraw(); }
+    COOP.err = ''; COOP.busy = true;
+    try {
+      const rs = snapList(await withTimeout(ccol('r').get(), 10000)).filter(x => x.k === `${S.no}-${d}`);
+      if (rs.length) COOP.err = 'Es wurde schon gespielt – die Aufstellung bleibt.';
+      else await withTimeout(cdoc(`a/${S.no}-${d}`).set({ us: ed.slice(), op: coopOppLine(S, d), t: Date.now(), by: net.uid }), 10000);
+      COOP.editing = false;
+    } catch (e) { COOP.err = 'Aufstellung konnte nicht gespeichert werden.'; }
+    COOP.busy = false; coopRefresh(); });
+  const pl = $('cpPl'); if (pl) pl.onchange = async () => {   // welchen Spieler aus dem Kader ich ersetze
+    const m = COOP.mem.find(x => x.id === net.uid); if (!m) return;
+    const taken = COOP.mem.some(x => x.id !== net.uid && x.pl === pl.value && pl.value);
+    if (taken) { COOP.err = 'Diesen Spieler hat schon ein Mitspieler.'; return coopDraw(); }
+    try { await withTimeout(cdoc('m/' + net.uid).set({ nm: m.nm || await getMyName(), t: m.t || Date.now(), pl: pl.value }), 10000); m.pl = pl.value; } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
+    coopRefresh(); };
   on('cpJoin', () => coopJoin(($('cpCode').value || '').trim().toUpperCase()));
   on('cpPlay', coopPlay);
   $('cpBody').querySelectorAll('[data-home]').forEach(b => b.onclick = async () => {   // Heimbahn wählen (gilt ab dem laufenden Spieltag)
     try { const t = await withTimeout(cdoc().get(), 10000); await withTimeout(cdoc().set({ ...t.data(), home: b.dataset.home }), 10000); } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
     if (!lanesLoaded) await lanesLoad(); coopRefresh(); });
   on('cpRemind', async () => {   // Kapitän erinnert, wer noch nicht gespielt hat
-    const S = COOP.S, d = COOP.day, line = coopLine(), only = line.filter(u => !COOP.res.some(x => x.uid === u));
+    const S = COOP.S, d = COOP.day, line = S.club ? coopHumans(coopLU()) : coopLine(), only = line.filter(u => !COOP.res.some(x => x.uid === u));
     const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), opp = S.teams[a === 0 ? b : a].name;
     const j = await window.__push.team(COOP.tid, { kind: 'remind', only, title: 'Coop-Liga: dein Duell wartet', body: `Spieltag ${d + 1} gegen ${opp} – ${line.length - only.length} von ${line.length} haben schon gespielt.` });
     toast('Erinnerung', j?.sent ? `an ${j.sent} Gerät${j.sent > 1 ? 'e' : ''} geschickt` : 'niemand hat Mitteilungen eingeschaltet', j?.sent ? '#5fd38a' : '#a7b3c2'); });
@@ -3974,18 +4121,25 @@ function coopBind() {
     try { await withTimeout(cdoc('m/' + net.uid).delete(), 10000); } catch (e) { }
     store.set('coop', ''); COOP.tid = ''; COOP.team = null; coopDraw(); });
 }
-async function coopCreate(fmt) {
-  const name = ($('cpName').value || '').trim().slice(0, 24);
-  if (!name) { COOP.err = 'Bitte zuerst einen Teamnamen eingeben.'; return coopDraw(); }
+async function coopCreate(club) {
+  if (!SL_CLUBS.some(c => c.name === club)) return;
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let code = '';
   try {
     for (let i = 0; i < 5; i++) { code = Array.from({ length: 6 }, () => A[Math.floor(Math.random() * A.length)]).join('');
       if (!(await withTimeout(net.db.doc('coop/' + code).get(), 10000)).exists) break; }
     COOP.tid = code;
-    await withTimeout(cdoc().set({ name, cap: net.uid, fmt: fmt === 4 ? 4 : 1, sno: 1, div: 10, hist: [], t: Date.now() }), 10000);
+    await withTimeout(cdoc().set({ name: club, club, home: SL_LANES[club] ? club : '', cap: net.uid, fmt: 4, sno: 1, div: 10, hist: [], t: Date.now() }), 10000);
     await withTimeout(cdoc('m/' + net.uid).set({ nm: await getMyName(), t: Date.now() }), 10000);
-    store.set('coop', code); COOP.note = `Team gegründet! Schick den Code ${code} an deine Mitspieler.`;
+    store.set('coop', code); COOP.note = `Team gegründet! Wähle unten, welchen Spieler du ersetzt, und schick den Code ${code} an deine Mitspieler.`;
   } catch (e) { COOP.tid = ''; COOP.err = 'Team konnte nicht angelegt werden.'; }
+  coopRefresh();
+}
+async function coopSetClub(club) {   // bestehendes Team (ohne Verein) übernimmt einen Verein → neue Saison
+  if (!SL_CLUBS.some(c => c.name === club) || !confirm(`${club} übernehmen? Es beginnt eine neue Saison.`)) return;
+  try { const t = await withTimeout(cdoc().get(), 10000), cur = t.data(), started = Object.keys(COOP.frozen).length > 0;
+    await withTimeout(cdoc().set({ ...cur, club, name: club, home: SL_LANES[club] ? club : '', sno: (cur.sno | 0 || 1) + (started ? 1 : 0) }), 10000);
+    COOP.note = `Ihr spielt jetzt als ${club}. Jeder wählt unten, welchen Spieler er ersetzt.`;
+  } catch (e) { COOP.err = 'Speichern hat nicht geklappt.'; }
   coopRefresh();
 }
 async function coopJoin(code) {
@@ -4003,9 +4157,11 @@ async function coopJoin(code) {
 }
 async function coopPlay() {
   COOP.busy = true; try { await coopLoad(); } catch (e) { } COOP.busy = false;
-  const S = COOP.S, d = COOP.day, k = coopLine().indexOf(net.uid);
+  const S = COOP.S, d = COOP.day, k = S?.club ? (COOP.lu ? COOP.lu.us.indexOf(net.uid) : -1) : coopLine().indexOf(net.uid);
   if (!S || d >= COOP_DAYS || k < 0 || COOP.res.some(x => x.uid === net.uid)) return coopDraw();
-  const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), home = a === 0, ot = home ? b : a, o = coopLineup(S, ot, d)[k];
+  const [a, b] = S.days[d].find(([x, y]) => x === 0 || y === 0), home = a === 0, ot = home ? b : a;
+  const o = S.club ? S.teams[ot].roster.find(p => p.name === COOP.lu.op[k]) : coopLineup(S, ot, d)[k];
+  if (!o) return coopDraw();
   const venue = home ? 0 : ot, lc = home ? S.home : S.teams[ot].name, li = lc ? SL_LANES[lc] : null;
   const avg = Math.round(o.avg * lvlF(S.lvl) + laneAdj(S, venue) + (home ? -COOP_HOME : COOP_HOME));   // Gast spielt etwas schwächer
   COOPG = { tid: COOP.tid, no: S.no, d, k, home, opp: { name: o.name, avg, skill: skillFor(avg) }, team: S.teams[ot].name, done: false,
