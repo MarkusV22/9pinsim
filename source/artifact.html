@@ -3083,6 +3083,7 @@ const hallShare = h => { const o = { ...h }; delete o.gfx; delete o.id; return o
 function hallOptions() {
   const l = halls.map(hallShare);
   HALL_PRESETS.forEach(p => { if (!l.some(h => h.name === p.name)) l.push(hallShare(cleanHall(p))); });
+  try { Object.entries(SL_LANES).forEach(([c, x]) => l.push({ ...hallShare(laneHall(c)), name: x.bahn.slice(0, 24), club: c })); } catch (e) { }   // Vereinsbahnen
   return l;
 }
 function ncStart(room, ids, names, title, vs, done, lost) {
@@ -3095,7 +3096,7 @@ function ncStart(room, ids, names, title, vs, done, lost) {
   $('nsOk').classList.add('pri'); $('nsOkSub').textContent = 'startet, wenn alle bereit sind';
   NC.opts = hallOptions();
   $('nsHalls').innerHTML = NC.opts.map((h, i) => `<button data-h="${i}"><i style="background:${h.lane}"></i>${esc(h.name)}</button>`).join('');
-  $('nsHalls').querySelectorAll('[data-h]').forEach(b => b.onclick = () => ncSet({ hl: NC.opts[+b.dataset.h] }));
+  $('nsHalls').querySelectorAll('[data-h]').forEach(b => b.onclick = () => { const o = NC.opts[+b.dataset.h]; ncSet(o.club ? { hl: o, sl: laneSl(SL_LANES[o.club]) } : { hl: o }); });
   clearInterval(NC.iv); NC.iv = setInterval(ncTick, 250); ncTick();
 }
 function ncSet(ch) {   // eigene Änderung: Nummer über alles bisher Gesehene
@@ -3118,8 +3119,8 @@ function ncTick() {
   NC.maxV = Math.max(0, ...valid.map(x => x.cf.v | 0));
   const w = valid[0], key = w.peer + JSON.stringify(w.cf);
   if (key !== NC.key) {
-    NC.key = key; NC.best = { sl: clamp(+w.cf.sl, 0, 1), hall: cleanHall(w.cf.hl), by: w.peer };
-    NC.best.hall.gfx = {};
+    NC.key = key; NC.best = { sl: clamp(+w.cf.sl, 0, 1), hall: w.cf.hl.club && SL_LANES[w.cf.hl.club] ? laneHall(w.cf.hl.club) : cleanHall(w.cf.hl), by: w.peer };
+    if (!(w.cf.hl.club && SL_LANES[w.cf.hl.club])) NC.best.hall.gfx = {};   // eigene Bilder bleiben auf dem eigenen Gerät; Vereinsbahnen haben ihre Bilder eingebaut
     setSlip(NC.best.sl); applyHall(NC.best.hall);
     $('nsSlip').value = NC.best.sl; $('nsSlipVal').textContent = slipLabel(NC.best.sl);
     $('nsHalls').querySelectorAll('[data-h]').forEach(b => b.classList.toggle('on', NC.opts[+b.dataset.h].name === NC.best.hall.name));
@@ -4234,7 +4235,7 @@ function errLog(m, src) {
 }
 addEventListener('error', e => errLog(e.message, (e.filename || '').split('/').pop() + ':' + e.lineno));
 addEventListener('unhandledrejection', e => errLog('Promise: ' + (e.reason?.message || e.reason), ''));
-netInit().then(ok => ok && friendsInit());
+netInit().then(ok => { if (ok) friendsInit(); return lanesLoad(); }).then(() => { if (String(store.get('hallId', '')).startsWith('sl:') && state !== 'editor') applyHall(activeHall()); }).catch(() => { });
 setTimeout(welcomeMaybe, 600);
 
 document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
@@ -4344,7 +4345,11 @@ if (!store.get('bright1', false)) {   // 19.11.: hellere Halle – alte dunkle V
   rawSet('bright1', true); if (ch) { rawSet('halls_t', Date.now()); store.set('halls', halls); }
 }
 if (!halls.length) halls = [cleanHall({ ...HALL_DEF, id: 'classic' })];
-const activeHall = () => halls.find(h => h.id === store.get('hallId', halls[0].id)) || halls[0];
+const activeHall = () => {   // hallId 'sl:<Verein>' = Vereinsbahn
+  const id = store.get('hallId', halls[0].id);
+  if (typeof id === 'string' && id.startsWith('sl:')) { try { if (SL_LANES[id.slice(3)]) { const h = laneHall(id.slice(3)); h.id = id; return h; } } catch (e) { } }
+  return halls.find(h => h.id === id) || halls[0];
+};
 const saveHalls = () => { rawSet('halls_t', Date.now()); store.set('halls', halls); };
 const _ceilLight = new THREE.Color(0xd7dbe0), _cool = new THREE.Color(0xdde8ff), _warmC = new THREE.Color(0xffd9a8), _white = new THREE.Color(0xffffff);
 let ballCol = '#1d3f9e';
@@ -4388,6 +4393,21 @@ function showHalls() {
     ed.onclick = e => { e.stopPropagation(); openEditor(h.id); };
     row.onclick = () => { store.set('hallId', h.id); applyHall(h); showHalls(); };
     row.append(sw, nm, ed); $('hallList').append(row);
+  });
+  // Vereinsbahnen der Superliga: antippen = darauf spielen (mit ihrem Kegelstand)
+  const sec = document.createElement('div'); sec.className = 'secT'; sec.innerHTML = '<span>Vereinsbahnen</span><small>Optik und Kegelstand wie beim Verein</small>'; $('hallList').append(sec);
+  Object.entries(SL_LANES).forEach(([club, l]) => {
+    const h = laneHall(club), on = act.id === 'sl:' + club;
+    const row = document.createElement('div'); row.className = 'hl' + (on ? ' on' : '');
+    const sw = document.createElement('div'); sw.className = 'sw';
+    [h.lane, h.gold, h.wallTop, h.carpet].forEach(c => { const i = document.createElement('i'); i.style.background = c; sw.append(i); });
+    const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = l.bahn;
+    const sm = document.createElement('small'); sm.textContent = (on ? '✓ wird gespielt · ' : '') + `${club} · Index ${l.idx > 0 ? '+' : ''}${l.idx} · ${slipLabel(laneSl(l))}`; nm.append(sm);
+    row.append(sw, nm);
+    if (isAdmin()) { const ed = document.createElement('button'); ed.textContent = '✎'; ed.onclick = e => { e.stopPropagation(); openLaneEditor(club); }; row.append(ed); }
+    row.onclick = () => { store.set('hallId', 'sl:' + club); slip = laneSl(l); setSlip(slip); store.set('slip2', slip); $('slip').value = slip; $('slipVal').textContent = slipLabel(slip);
+      applyHall(activeHall()); toast(l.bahn, 'Kegelstand: ' + slipLabel(slip), '#5fd38a'); showHalls(); };
+    $('hallList').append(row);
   });
   ['menu', 'onHub', 'profile', 'editor'].forEach(id => $(id).classList.add('hidden')); $('halls').classList.remove('hidden');
   state = 'menu';

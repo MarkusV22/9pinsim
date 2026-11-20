@@ -1,5 +1,5 @@
 // Service Worker: App offline verfügbar, Updates beim nächsten Start
-const V = '9pinsim-dd7ab9b4f9', ASSETS = ["./", "./icons/apple-180.png", "./icons/favicon-64.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./index.html", "./manifest.webmanifest", "./vendor/addons/environments/RoomEnvironment.js", "./vendor/cannon-es.js", "./vendor/three.module.min.js"];
+const V = '9pinsim-448bf15ccb', ASSETS = ["./", "./icons/apple-180.png", "./icons/favicon-64.png", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./index.html", "./manifest.webmanifest", "./vendor/addons/environments/RoomEnvironment.js", "./vendor/cannon-es.js", "./vendor/three.module.min.js"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V && k !== 'fonts').map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
