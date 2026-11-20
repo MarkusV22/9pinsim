@@ -816,7 +816,7 @@ const stand = new THREE.Mesh(new THREE.PlaneGeometry(WK, standLen), new THREE.Me
 stand.rotation.x = -Math.PI / 2; stand.position.set(0, 0, KS - standLen / 2); stand.receiveShadow = true; scene.add(stand);
 const bohle = new THREE.Mesh(new THREE.PlaneGeometry(BOHLE, 1.2), new THREE.MeshStandardMaterial({ color: 0x6e2c20, roughness: .2, metalness: .1 }));
 bohle.rotation.x = -Math.PI / 2; bohle.position.set(0, .003, .4); bohle.receiveShadow = true; scene.add(bohle);
-// Anlauf: ab der Foul-Linie nach hinten ganz aus Linoleum (eigene Farbe im Bahn-Editor) – auf der Bahn, daneben und dahinter
+// Anlauf: ab der Foul-Linie nach hinten aus Linoleum, so breit wie die Bahn (eigene Farbe im Bahn-Editor); Teppich links und rechts bleibt
 const anlaufMat = new THREE.MeshStandardMaterial({ color: 0x4a4f55, roughness: .55, metalness: 0, envMapIntensity: .2 });
 const anlaufLane = new THREE.Mesh(new THREE.PlaneGeometry(W, 1), anlaufMat);
 anlaufLane.rotation.x = -Math.PI / 2; anlaufLane.position.set(0, .0015, .5); anlaufLane.receiveShadow = true; scene.add(anlaufLane);
@@ -1703,13 +1703,10 @@ function setLayout(p, duo) {
   laneFloor.children.slice().forEach(m => { m.geometry.dispose(); laneFloor.remove(m); });   // Boden + Seitenwände neu
   const CW = WK / 2 + .03, xs = [0, 1, 2, 3].map(i => (i - p) * GAP);
   const wl = xs[0] - XR - HALL_WALK, wr = xs[3] + XR + HALL_WALK;   // Seitenwände
-  floorPlane(wl, xs[0] - CW, KS, 0, -.004);   // Teppich bis zur Foul-Linie, dahinter Linoleum (Anlauf)
-  for (let i = 0; i < 3; i++) floorPlane(xs[i] + CW, xs[i + 1] - CW, KS, 0, -.004);
-  floorPlane(xs[3] + CW, wr, KS, 0, -.004);
-  floorPlane(wl, xs[0] - CW, 0, 1, -.004, anlaufMat);
-  for (let i = 0; i < 3; i++) floorPlane(xs[i] + CW, xs[i + 1] - CW, 0, 1, -.004, anlaufMat);
-  floorPlane(xs[3] + CW, wr, 0, 1, -.004, anlaufMat);
-  floorPlane(wl, wr, 1, HALL_Z1, -.002, anlaufMat);
+  floorPlane(wl, xs[0] - CW, KS, HALL_Z1, -.004);   // Teppich neben und zwischen den Bahnen bis ganz hinten
+  for (let i = 0; i < 3; i++) floorPlane(xs[i] + CW, xs[i + 1] - CW, KS, HALL_Z1, -.004);
+  floorPlane(xs[3] + CW, wr, KS, HALL_Z1, -.004);
+  xs.forEach(x => floorPlane(x - CW, x + CW, 1, HALL_Z1, -.002, anlaufMat));   // Anlauf (Linoleum) so breit wie die Bahn, hinter der Aufsatzbohle
   hallWall(wl, 1); hallWall(wr, -1);
   hallFrontPanel(wl, xs[0] - XR); hallFrontPanel(xs[3] + XR, wr);
   hallCeiling(wl, wr, xs);
